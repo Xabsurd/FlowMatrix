@@ -1,0 +1,68 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
+@forward 'element-plus/theme-chalk/src/common/var.scss' with (
+  $colors: (
+    'primary': (
+      'base': #1774a6,
+    ),
+    'success': (
+      'base': #218a61,
+    ),
+    'warning': (
+      'base': #b98218,
+    ),
+    'danger': (
+      'base': #c94a5a,
+    ),
+    'error': (
+      'base': #c94a5a,
+    ),
+    'info': (
+      'base': #647287,
+    ),
+  ),
+  $text-color: (
+    'primary': #182333,
+    'regular': #243244,
+    'secondary': #647287,
+    'placeholder': #8a98ab,
+    'disabled': #aeb8c6,
+  ),
+  $bg-color: (
+    '': #ffffff,
+    'page': #edf3f8,
+    'overlay': #f8fafc,
+  ),
+  $fill-color: (
+    '': #e8eef5,
+    'light': #eff3f8,
+    'lighter': #f4f7fa,
+    'extra-light': #f8fafc,
+    'dark': #dbe3ec,
+    'darker': #cfd9e5,
+    'blank': #ffffff,
+  ),
+  $border-color: (
+    '': #d4dce7,
+    'light': #dce4ee,
+    'lighter': #e5ebf2,
+    'extra-light': #eef3f8,
+    'dark': #c5d0dd,
+    'darker': #b6c3d2,
+  ),
+  $border-radius: (
+    'base': 8px,
+    'small': 6px,
+    'round': 20px,
+    'circle': 100%,
+  ),
+  $box-shadow: (
+    '': 0 18px 42px rgba(37, 54, 75, 0.12),
+    'light': 0 14px 40px rgba(37, 54, 75, 0.12),
+    'lighter': 0 10px 24px rgba(37, 54, 75, 0.1),
+    'dark': 0 22px 56px rgba(37, 54, 75, 0.18),
+  ),
+  $mask-color: (
+    '': rgba(18, 28, 42, 0.28),
+    'extra-light': rgba(18, 28, 42, 0.16),
+  )
+);

@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+node_modules
+.agents
+.nuxt
+.output
+.data
+data
+dist
+coverage
+*.log
+.env
+.env.*
+!.env.example

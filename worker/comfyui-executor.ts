@@ -1,0 +1,234 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+import { writeFileSync, mkdirSync, existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { getSqlite } from '../server/infrastructure/db/sqlite'
+import { selectBackend, updateBackendLoad, updateBackendModelSignature, markBackendUnhealthy } from '../server/domain/backends'
+import { getWorkflow } from '../server/domain/workflows'
+import { getPreset } from '../server/domain/presets'
+import { updateTaskStatus, incrementBatchProgress } from '../server/domain/batch'
+import * as comfyui from '../server/infrastructure/comfyui/client'
+import type { BackendScheduleMode } from '../shared/types/app'
+
+const POLL_INTERVAL_MS = 2000
+const OUTPUT_DIR = './data/outputs'
+
+export async function executeComfyUITask(taskId: string): Promise<void> {
+  const db = getSqlite()
+  const task = db.prepare('SELECT * FROM run_tasks WHERE id = ?').get(taskId) as Record<string, unknown> | undefined
+  if (!task) throw new Error(`Task ${taskId} not found`)
+
+  const workflowId = task.workflow_id as string
+  const presetId = task.preset_id as string
+  const inputParams = JSON.parse((task.input_params as string) || '{}')
+  const batchRunId = task.batch_run_id as string
+  const workspaceId = task.workspace_id as string
+
+  // Load workflow and preset
+  const workflow = getWorkflow(workflowId)
+  if (!workflow) throw new Error(`Workflow ${workflowId} not found`)
+
+  const preset = getPreset(presetId)
+  const scheduleMode = (preset?.scheduleMode || 'idle-first') as BackendScheduleMode
+
+  // Build required resources from input params (model references)
+  const requiredResources = extractRequiredResources(inputParams, preset?.nodeParams || [])
+
+  // Select backend
+  const decision = selectBackend({
+    backendIds: preset?.backendId ? [preset.backendId] : undefined,
+    groupId: preset?.backendGroupId || undefined,
+    requiredResources,
+    mode: scheduleMode
+  }, workspaceId)
+
+  if (!decision.backendId) {
+    throw new Error(`No eligible backend: ${decision.reasons.join(', ')}`)
+  }
+
+  // Update task with schedule decision
+  updateTaskStatus(taskId, 'running', {
+    backendId: decision.backendId,
+    scheduleDecision: decision
+  })
+
+  const backend = db.prepare('SELECT * FROM backends WHERE id = ?').get(decision.backendId) as Record<string, unknown>
+  if (!backend) throw new Error('Selected backend disappeared')
+
+  const endpoint = (backend.endpoint as string).endsWith('/') ? (backend.endpoint as string).slice(0, -1) : (backend.endpoint as string)
+
+  // Apply parameter substitutions to workflow
+  const rawWorkflow = JSON.parse(JSON.stringify(workflow.rawJson))
+  const patchedWorkflow = await applyParams(rawWorkflow, inputParams, preset?.nodeParams || [], endpoint)
+
+  // Extract model signature for future affinity
+  const sig = comfyui.extractModelSignature(patchedWorkflow)
+  updateBackendModelSignature(decision.backendId, sig)
+
+  // Submit prompt
+  const clientId = `flowmatrix-${taskId}`
+  let promptResponse: comfyui.ComfyUIPromptResponse
+  try {
+    promptResponse = await comfyui.submitPrompt(endpoint, patchedWorkflow, clientId)
+  } catch (error) {
+    markBackendUnhealthy(decision.backendId)
+    throw error
+  }
+
+  updateTaskStatus(taskId, 'running', { externalTaskId: promptResponse.prompt_id })
+
+  // Poll for completion
+  let history: comfyui.ComfyUIHistoryItem | null = null
+  const timeoutMs = (task.timeout_seconds as number || 300) * 1000
+  const startTime = Date.now()
+
+  while (!history) {
+    if (Date.now() - startTime > timeoutMs) {
+      throw new Error(`Task timed out after ${timeoutMs / 1000}s`)
+    }
+    await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS))
+
+    // Check if task is canceled in database
+    const currentTask = db.prepare('SELECT status FROM run_tasks WHERE id = ?').get(taskId) as { status: string } | undefined
+    if (currentTask && (currentTask.status === 'canceled' || currentTask.status === 'canceling')) {
+      try {
+        await comfyui.interruptPrompt(endpoint)
+      } catch { /* ignore */ }
+      throw new Error('Task was canceled by user')
+    }
+
+    try {
+      history = await comfyui.getHistory(endpoint, promptResponse.prompt_id)
+      if (history && !history.status.completed) history = null
+    } catch {
+      // Transient error, keep polling
+    }
+
+    // Update backend load from queue info
+    try {
+      const q = await comfyui.getQueueInfo(endpoint)
+      updateBackendLoad(decision.backendId, q.exec_info.queue_running, q.exec_info.queue_pending)
+    } catch { /* non-critical */ }
+  }
+
+  // Check for errors
+  if (history.status.status_str === 'error') {
+    const errorMsg = history.status.messages.map(m => JSON.stringify(m)).join('\n')
+    throw new Error(`ComfyUI error: ${errorMsg}`)
+  }
+
+  // Download and save outputs
+  if (!existsSync(OUTPUT_DIR)) mkdirSync(OUTPUT_DIR, { recursive: true })
+  const taskOutputDir = join(OUTPUT_DIR, taskId)
+  if (!existsSync(taskOutputDir)) mkdirSync(taskOutputDir, { recursive: true })
+
+  const results: Array<{ filename: string; path: string; type: string; size: number }> = []
+
+  for (const [nodeId, output] of Object.entries(history.outputs)) {
+    if (output.images) {
+      for (let i = 0; i < output.images.length; i++) {
+        const img = output.images[i]
+        const buffer = await comfyui.getImage(endpoint, img.filename, img.subfolder, img.type)
+        const filename = `${nodeId}_${i}_${img.filename}`
+        const filePath = join(taskOutputDir, filename)
+        writeFileSync(filePath, buffer)
+
+        // Save to run_results table
+        const resultId = randomUUID()
+        db.prepare(`
+          INSERT INTO run_results (id, task_id, batch_run_id, workspace_id, output_type, storage_driver, storage_key, file_name, mime_type, file_size, metadata, created_at)
+          VALUES (?, ?, ?, ?, 'image', 'local', ?, ?, 'image/png', ?, ?, ?)
+        `).run(resultId, taskId, batchRunId, workspaceId, filePath, filename, buffer.length, JSON.stringify({ nodeId, source: img }), Date.now())
+
+        results.push({ filename, path: filePath, type: 'image', size: buffer.length })
+      }
+    }
+  }
+
+  // Mark task as succeeded
+  updateTaskStatus(taskId, 'succeeded', {
+    resultJson: { outputs: results, promptId: promptResponse.prompt_id }
+  })
+  incrementBatchProgress(batchRunId, 'completed_tasks')
+}
+
+function extractRequiredResources(
+  inputParams: Record<string, unknown>,
+  nodeParams: Array<{ nodeId: string; nodeType: string; inputName: string; inferredType: string; runtimeInput?: boolean; defaultValue?: unknown }>
+): Array<{ type: string; name: string }> {
+  const resources: Array<{ type: string; name: string }> = []
+  for (const mapping of nodeParams) {
+    const paramKey = `${mapping.nodeId}.${mapping.inputName}`
+    const value = mapping.runtimeInput ? inputParams[paramKey] : mapping.defaultValue
+    if (mapping.inferredType === 'MODEL' && value) {
+      const type = inferResourceType(mapping.nodeType, mapping.inputName)
+      if (type) resources.push({ type, name: String(value) })
+    }
+  }
+  return resources
+}
+
+function inferResourceType(nodeType: string, inputName: string): string | null {
+  if (nodeType === 'CheckpointLoaderSimple' && inputName === 'ckpt_name') return 'checkpoint'
+  if (nodeType === 'LoraLoader' && inputName === 'lora_name') return 'lora'
+  if (nodeType === 'VAELoader' && inputName === 'vae_name') return 'vae'
+  if (nodeType === 'UNETLoader' && inputName === 'unet_name') return 'unet'
+  if (nodeType === 'ControlNetLoader') return 'controlnet'
+  if (nodeType === 'UpscaleModelLoader') return 'upscale'
+  if (nodeType === 'EmbeddingLoader') return 'embedding'
+  return null
+}
+
+function applyParams(
+  workflow: Record<string, unknown>,
+  inputParams: Record<string, unknown>,
+  nodeParams: Array<{ nodeId: string; inputName: string; inferredType?: string; runtimeInput?: boolean; defaultValue?: unknown }>,
+  endpoint: string
+): Promise<Record<string, unknown>> {
+  const patched = JSON.parse(JSON.stringify(workflow)) as Record<string, Record<string, unknown>>
+
+  return Promise.all(nodeParams.map(async (mapping) => {
+    const paramKey = `${mapping.nodeId}.${mapping.inputName}`
+    const hasRuntimeValue = paramKey in inputParams
+    if (mapping.runtimeInput && !hasRuntimeValue) return
+    if (!mapping.runtimeInput && mapping.defaultValue === undefined) return
+
+    const node = patched[mapping.nodeId]
+    if (!node || !node.inputs) return
+
+    const inputs = node.inputs as Record<string, unknown>
+    let value = mapping.runtimeInput ? inputParams[paramKey] : mapping.defaultValue
+
+    // Handle seed randomization
+    if (value === -1 && mapping.inputName === 'seed') {
+      value = Math.floor(Math.random() * 2 ** 32)
+    }
+
+    if (mapping.inferredType === 'IMAGE' && isRuntimeAsset(value)) {
+      const uploaded = await comfyui.uploadImage(
+        endpoint,
+        readFileSync(value.storageKey),
+        value.fileName,
+        value.mimeType
+      )
+      value = uploaded.name
+    } else if (mapping.inferredType === 'FILE' && isRuntimeAsset(value)) {
+      value = value.storageKey
+    }
+
+    inputs[mapping.inputName] = value
+  })).then(() => patched)
+}
+
+function isRuntimeAsset(value: unknown): value is {
+  storageDriver: string
+  storageKey: string
+  fileName: string
+  mimeType?: string
+} {
+  if (typeof value !== 'object' || value === null) return false
+  const asset = value as Record<string, unknown>
+  return asset.storageDriver === 'local'
+    && typeof asset.storageKey === 'string'
+    && typeof asset.fileName === 'string'
+}

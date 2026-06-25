@@ -1,0 +1,48 @@
+{
+  "name": "flowmatrix",
+  "version": "0.1.0-alpha.0",
+  "type": "module",
+  "license": "AGPL-3.0-or-later",
+  "scripts": {
+    "postinstall": "nuxt prepare",
+    "dev": "nuxt dev --host 0.0.0.0",
+    "dev:web": "nuxt dev --host 0.0.0.0",
+    "build": "nuxt build",
+    "start": "node .output/server/index.mjs",
+    "preview": "nuxt preview --host 0.0.0.0",
+    "worker": "tsx worker/index.ts",
+    "typecheck": "nuxt typecheck",
+    "lint": "eslint .",
+    "test": "nuxt prepare && vitest run",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate"
+  },
+  "dependencies": {
+    "@element-plus/nuxt": "latest",
+    "@iconify-icons/lucide": "^1.2.135",
+    "@iconify/vue": "^5.0.1",
+    "@nuxtjs/color-mode": "latest",
+    "@nuxtjs/i18n": "latest",
+    "@pinia/nuxt": "latest",
+    "better-sqlite3": "^12.11.1",
+    "drizzle-orm": "latest",
+    "element-plus": "latest",
+    "nuxt": "latest",
+    "openai": "latest",
+    "pinia": "latest",
+    "sass": "^1.101.0",
+    "uuid": "latest",
+    "vue": "latest"
+  },
+  "devDependencies": {
+    "@nuxt/eslint": "latest",
+    "@types/better-sqlite3": "latest",
+    "@types/node": "latest",
+    "drizzle-kit": "latest",
+    "eslint": "latest",
+    "tsx": "latest",
+    "typescript": "latest",
+    "vitest": "latest",
+    "vue-tsc": "^3.3.5"
+  }
+}

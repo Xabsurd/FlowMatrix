@@ -1,0 +1,75 @@
+{
+  "app": {
+    "name": "FlowMatrix",
+    "modeLan": "LAN mode",
+    "modeCloud": "Cloud mode"
+  },
+  "nav": {
+    "home": "Home",
+    "backends": "Backends",
+    "workflows": "Workflows",
+    "presets": "Presets",
+    "batch": "Batch Runs",
+    "runs": "Runs",
+    "run": "Run",
+    "gallery": "Gallery",
+    "result": "Result",
+    "settings": "Settings"
+  },
+  "common": {
+    "save": "Save",
+    "test": "Test",
+    "refresh": "Refresh",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "retry": "Retry",
+    "export": "Export",
+    "loading": "Loading",
+    "empty": "No data",
+    "enabled": "Enabled",
+    "disabled": "Disabled"
+  },
+  "status": {
+    "queued": "Queued",
+    "running": "Running",
+    "succeeded": "Succeeded",
+    "failed": "Failed",
+    "canceling": "Canceling",
+    "canceled": "Canceled",
+    "retrying": "Retrying"
+  },
+  "dashboard": {
+    "title": "Home",
+    "subtitle": "Overview of queue activity, generated results, and system configuration."
+  },
+  "providers": {
+    "title": "Online API",
+    "subtitle": "OpenAI-compatible provider support is wired in and can switch vendors through baseURL.",
+    "baseUrl": "Base URL",
+    "apiKey": "API Key",
+    "model": "Model",
+    "prompt": "Prompt",
+    "generate": "Generate test",
+    "provider": "Provider",
+    "status": "Connection status"
+  },
+  "settings": {
+    "title": "Settings",
+    "subtitle": "Manage language, theme, runtime mode, and provider defaults.",
+    "language": "Language",
+    "theme": "Theme",
+    "componentSize": "Component size",
+    "componentSizeLarge": "Large",
+    "componentSizeDefault": "Default",
+    "componentSizeSmall": "Compact",
+    "backendsDescription": "Manage ComfyUI nodes, resource refresh, and connection tests.",
+    "workflowsDescription": "Import, maintain, and validate workflow JSON.",
+    "presetsDescription": "Configure invocation parameters, weights, and tags.",
+    "batchDescription": "Create batch jobs and tune concurrency strategy.",
+    "themeLight": "Mist glass",
+    "themeDark": "Midnight glass",
+    "themeSystem": "System",
+    "themeAurora": "Aurora",
+    "themeGraphite": "Graphite"
+  }
+}

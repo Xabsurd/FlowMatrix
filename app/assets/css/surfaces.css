@@ -1,0 +1,105 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
+
+.fm-panel,
+.fm-card {
+  border: 1px solid color-mix(in srgb, var(--fm-border) 78%, var(--fm-glass-edge));
+  border-radius: var(--fm-radius);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--fm-glass-edge) 10%, transparent), transparent 38%),
+    var(--fm-panel);
+  box-shadow: var(--fm-shadow);
+}
+
+.fm-sidebar-surface {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--fm-panel-strong) 68%, transparent), transparent 48%),
+    linear-gradient(135deg, color-mix(in srgb, var(--fm-primary) 8%, transparent), transparent 42%),
+    color-mix(in srgb, var(--fm-panel) 82%, transparent);
+  backdrop-filter: blur(var(--fm-blur)) saturate(1.12);
+  -webkit-backdrop-filter: blur(var(--fm-blur)) saturate(1.12);
+}
+
+.el-overlay {
+  background-color: var(--fm-mask);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.el-dialog,
+.el-drawer,
+.el-message-box,
+.el-popover,
+.el-notification,
+.el-message,
+.el-popper,
+.el-dropdown__popper,
+.el-picker__popper,
+.el-select__popper,
+.el-cascader__dropdown {
+  border: 1px solid color-mix(in srgb, var(--fm-border) 82%, var(--fm-glass-edge));
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--fm-glass-edge) 7%, transparent), transparent 42%),
+    color-mix(in srgb, var(--fm-popper-bg) 82%, transparent);
+  box-shadow: var(--fm-shadow);
+  backdrop-filter: blur(var(--fm-blur)) saturate(1.12);
+  -webkit-backdrop-filter: blur(var(--fm-blur)) saturate(1.12);
+}
+
+.el-dialog,
+.el-drawer,
+.el-message-box,
+.el-popover,
+.el-popper {
+  border-radius: var(--fm-radius);
+}
+
+.el-card,
+.el-table,
+.el-tabs--border-card,
+.el-collapse,
+.el-menu,
+.el-alert,
+.el-descriptions,
+.el-timeline-item__wrapper {
+  border-color: color-mix(in srgb, var(--fm-border) 78%, var(--fm-glass-edge));
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--fm-glass-edge) 6%, transparent), transparent 44%),
+    color-mix(in srgb, var(--fm-panel) 72%, transparent);
+  backdrop-filter: blur(var(--fm-blur)) saturate(1.08);
+  -webkit-backdrop-filter: blur(var(--fm-blur)) saturate(1.08);
+}
+
+.el-table th.el-table__cell,
+.el-table tr,
+.el-table .el-table__cell,
+.el-table__inner-wrapper::before,
+.el-tabs--border-card > .el-tabs__header,
+.el-collapse-item__header,
+.el-collapse-item__wrap,
+.el-menu {
+  border-color: var(--el-border-color);
+  background: transparent;
+}
+
+.el-collapse-item__content {
+  color: var(--fm-text);
+  background: transparent;
+}
+
+.el-table--enable-row-hover .el-table__body tr:hover > td.el-table__cell,
+.el-select-dropdown__item.hover,
+.el-select-dropdown__item:hover,
+.el-dropdown-menu__item:not(.is-disabled):focus,
+.el-dropdown-menu__item:not(.is-disabled):hover,
+.el-menu-item:hover,
+.el-sub-menu__title:hover {
+  background: var(--fm-option-hover);
+}
+
+.el-tag,
+.el-check-tag,
+.el-radio-button__inner,
+.el-segmented {
+  border-color: color-mix(in srgb, var(--fm-border) 74%, var(--fm-glass-edge));
+  background: color-mix(in srgb, var(--fm-panel-muted) 54%, transparent);
+}

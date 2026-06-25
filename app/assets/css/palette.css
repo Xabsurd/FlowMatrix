@@ -1,0 +1,109 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
+:root {
+  --fm-color-scheme: light;
+  --fm-bg: #edf3f8;
+  --fm-bg-2: #f8fafc;
+  --fm-panel: #ffffff;
+  --fm-panel-strong: #f8fafc;
+  --fm-panel-muted: #e8eef5;
+  --fm-text: #182333;
+  --fm-muted: #647287;
+  --fm-border: rgba(77, 96, 122, 0.18);
+  --fm-glass-edge: rgba(255, 255, 255, 0.72);
+  --fm-glass-sheen: transparent;
+  --fm-field-bg: rgba(232, 238, 245, 0.46);
+  --fm-field-bg-hover: rgba(232, 238, 245, 0.46);
+  --fm-popper-bg: #ffffff;
+  --fm-option-hover: rgba(23, 116, 166, 0.11);
+  --fm-primary: #1774a6;
+  --fm-primary-rgb: 23, 116, 166;
+  --fm-primary-soft: rgba(23, 116, 166, 0.14);
+  --fm-on-primary: #ffffff;
+  --fm-accent: #1f9f8a;
+  --fm-success: #218a61;
+  --fm-success-rgb: 33, 138, 97;
+  --fm-warning: #b98218;
+  --fm-warning-rgb: 185, 130, 24;
+  --fm-danger: #c94a5a;
+  --fm-danger-rgb: 201, 74, 90;
+  --fm-on-tone: #ffffff;
+  --fm-shadow: 0 18px 42px rgba(37, 54, 75, 0.12);
+  --fm-glow-a: rgba(23, 116, 166, 0.18);
+  --fm-glow-b: rgba(31, 159, 138, 0.14);
+  --fm-mask: rgba(18, 28, 42, 0.28);
+  --fm-blur: 22px;
+  --fm-radius: 8px;
+  --el-color-mix-bg: #ffffff;
+  --el-color-mix-opposite: #000000;
+  --el-bg-color: color-mix(in srgb, var(--fm-panel) 86%, transparent);
+  --el-bg-color-page: var(--fm-bg);
+  --el-bg-color-overlay: color-mix(in srgb, var(--fm-popper-bg) 90%, transparent);
+  --el-fill-color: color-mix(in srgb, var(--fm-panel-muted) 80%, transparent);
+  --el-fill-color-light: color-mix(in srgb, var(--fm-panel-muted) 26%, transparent);
+  --el-fill-color-lighter: color-mix(in srgb, var(--fm-panel-muted) 38%, transparent);
+  --el-fill-color-extra-light: color-mix(in srgb, var(--fm-panel-strong) 34%, transparent);
+  --el-fill-color-dark: color-mix(in srgb, var(--fm-panel-muted) 86%, var(--fm-text) 6%);
+  --el-fill-color-darker: color-mix(in srgb, var(--fm-panel-muted) 78%, var(--fm-text) 12%);
+  --el-fill-color-blank: color-mix(in srgb, var(--fm-panel) 68%, transparent);
+  --el-border-color: var(--fm-border);
+  --el-border-color-light: color-mix(in srgb, var(--fm-border) 70%, var(--fm-glass-edge));
+  --el-border-color-lighter: color-mix(in srgb, var(--fm-border) 54%, var(--fm-glass-edge));
+  --el-border-color-extra-light: color-mix(in srgb, var(--fm-border) 38%, var(--fm-glass-edge));
+  --el-border-color-dark: color-mix(in srgb, var(--fm-border) 82%, var(--fm-text) 14%);
+  --el-border-color-darker: color-mix(in srgb, var(--fm-border) 90%, var(--fm-text) 20%);
+  --el-text-color-primary: var(--fm-text);
+  --el-text-color-regular: color-mix(in srgb, var(--fm-text) 88%, var(--fm-muted));
+  --el-text-color-secondary: var(--fm-muted);
+  --el-text-color-placeholder: color-mix(in srgb, var(--fm-muted) 72%, transparent);
+  --el-text-color-disabled: color-mix(in srgb, var(--fm-muted) 48%, transparent);
+  --el-mask-color: var(--fm-mask);
+  --el-mask-color-extra-light: color-mix(in srgb, var(--fm-mask) 66%, transparent);
+  --el-box-shadow: var(--fm-shadow);
+  --el-box-shadow-light: var(--fm-shadow);
+  --el-box-shadow-lighter: 0 10px 26px rgba(37, 54, 75, 0.1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-fm-resolved-theme]) {
+    --fm-color-scheme: dark;
+    --fm-bg: #0c1117;
+    --fm-bg-2: #121a23;
+    --fm-panel: #141d27;
+    --fm-panel-strong: #1c2734;
+    --fm-panel-muted: #243140;
+    --fm-text: #eef5fb;
+    --fm-muted: #9caec1;
+    --fm-border: rgba(198, 217, 233, 0.14);
+    --fm-glass-edge: rgba(255, 255, 255, 0.13);
+    --fm-glass-sheen: rgba(255, 255, 255, 0.05);
+    --fm-field-bg: rgba(14, 21, 29, 0.44);
+    --fm-field-bg-hover: rgba(14, 21, 29, 0.44);
+    --fm-popper-bg: #121b25;
+    --fm-option-hover: rgba(52, 180, 215, 0.13);
+    --fm-primary: #34b4d7;
+    --fm-primary-rgb: 52, 180, 215;
+    --fm-primary-soft: rgba(52, 180, 215, 0.16);
+    --fm-on-primary: #061118;
+    --fm-accent: #35c7a6;
+    --fm-success: #59c98b;
+    --fm-success-rgb: 89, 201, 139;
+    --fm-warning: #e0b95b;
+    --fm-warning-rgb: 224, 185, 91;
+    --fm-danger: #ee7180;
+    --fm-danger-rgb: 238, 113, 128;
+    --fm-on-tone: #071016;
+    --fm-shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+    --fm-glow-a: rgba(52, 180, 215, 0.13);
+    --fm-glow-b: rgba(53, 199, 166, 0.1);
+    --fm-mask: rgba(3, 7, 12, 0.54);
+    --el-color-mix-bg: var(--el-bg-color, #141414);
+    --el-color-mix-opposite: #ffffff;
+  }
+}
+
+.dark,
+:root[data-fm-resolved-theme='midnight'],
+:root[data-fm-resolved-theme='aurora'],
+:root[data-fm-resolved-theme='graphite'] {
+  color-scheme: dark;
+}

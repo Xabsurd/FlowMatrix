@@ -1,0 +1,75 @@
+{
+  "app": {
+    "name": "流阵",
+    "modeLan": "局域网模式",
+    "modeCloud": "上线模式"
+  },
+  "nav": {
+    "home": "主页",
+    "backends": "执行后端",
+    "workflows": "工作流管理",
+    "presets": "调用配置",
+    "batch": "批量运行",
+    "runs": "运行",
+    "run": "运行",
+    "gallery": "结果图库",
+    "result": "结果",
+    "settings": "系统设置"
+  },
+  "common": {
+    "save": "保存",
+    "test": "测试",
+    "refresh": "刷新",
+    "cancel": "取消",
+    "delete": "删除",
+    "retry": "重试",
+    "export": "导出",
+    "loading": "加载中",
+    "empty": "暂无数据",
+    "enabled": "启用",
+    "disabled": "禁用"
+  },
+  "status": {
+    "queued": "排队中",
+    "running": "运行中",
+    "succeeded": "已成功",
+    "failed": "已失败",
+    "canceling": "取消中",
+    "canceled": "已取消",
+    "retrying": "重试中"
+  },
+  "dashboard": {
+    "title": "主页",
+    "subtitle": "总览运行队列、结果产出和当前系统配置状态。"
+  },
+  "providers": {
+    "title": "在线 API",
+    "subtitle": "OpenAI 兼容 Provider 已接入，可通过 baseURL 切换服务商。",
+    "baseUrl": "Base URL",
+    "apiKey": "API Key",
+    "model": "模型",
+    "prompt": "提示词",
+    "generate": "生成测试",
+    "provider": "服务商",
+    "status": "连接状态"
+  },
+  "settings": {
+    "title": "系统设置",
+    "subtitle": "管理语言、主题、运行模式和 Provider 默认参数。",
+    "language": "语言",
+    "theme": "主题",
+    "componentSize": "组件大小",
+    "componentSizeLarge": "宽松",
+    "componentSizeDefault": "默认",
+    "componentSizeSmall": "紧凑",
+    "backendsDescription": "管理 ComfyUI 节点、资源刷新和连接测试。",
+    "workflowsDescription": "导入、维护和校验工作流 JSON。",
+    "presetsDescription": "配置调用参数、权重和标签。",
+    "batchDescription": "创建批量任务并控制并发策略。",
+    "themeLight": "清昼玻璃",
+    "themeDark": "夜幕玻璃",
+    "themeSystem": "跟随系统",
+    "themeAurora": "极光",
+    "themeGraphite": "石墨"
+  }
+}
