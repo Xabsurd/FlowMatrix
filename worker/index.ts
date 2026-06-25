@@ -16,18 +16,24 @@ async function runOnce() {
     if (task) {
       const batchRunId = task.batch_run_id as string
       startBatchRun(batchRunId)
-      try {
-        queue.markProcessing(queueJob.id)
-        await executeComfyUITask(queueJob.taskId)
-        queue.markCompleted(queueJob.id)
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error)
-        queue.markFailed(queueJob.id, msg)
-        updateTaskStatus(queueJob.taskId, 'failed', { errorMessage: msg })
-        incrementBatchProgress(batchRunId, 'failed_tasks')
-      }
+      const batchJobs = [queueJob, ...queue.claimPendingBatchJobs(batchRunId, WORKER_ID)]
+      console.log(`Claimed ${batchJobs.length} task(s) for batch ${batchRunId.slice(0, 8)}. Submitting prompts together.`)
+      await Promise.all(batchJobs.map(job => executeJob(job, batchRunId)))
       return
     }
+  }
+}
+
+async function executeJob(queueJob: queue.QueueJob, batchRunId: string) {
+  try {
+    queue.markProcessing(queueJob.id)
+    await executeComfyUITask(queueJob.taskId)
+    queue.markCompleted(queueJob.id)
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error)
+    queue.markFailed(queueJob.id, msg)
+    updateTaskStatus(queueJob.taskId, 'failed', { errorMessage: msg })
+    incrementBatchProgress(batchRunId, 'failed_tasks')
   }
 }
 

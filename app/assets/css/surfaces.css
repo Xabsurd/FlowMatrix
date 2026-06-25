@@ -20,6 +20,7 @@
 }
 
 .el-overlay {
+  z-index: var(--fm-z-overlay);
   background-color: var(--fm-mask);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
@@ -29,8 +30,6 @@
 .el-drawer,
 .el-message-box,
 .el-popover,
-.el-notification,
-.el-message,
 .el-popper,
 .el-dropdown__popper,
 .el-picker__popper,
@@ -40,6 +39,27 @@
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--fm-glass-edge) 7%, transparent), transparent 42%),
     color-mix(in srgb, var(--fm-popper-bg) 82%, transparent);
+  box-shadow: var(--fm-shadow);
+  backdrop-filter: blur(var(--fm-blur)) saturate(1.12);
+  -webkit-backdrop-filter: blur(var(--fm-blur)) saturate(1.12);
+}
+
+.el-popover,
+.el-popper,
+.el-dropdown__popper,
+.el-picker__popper,
+.el-select__popper,
+.el-cascader__dropdown {
+  z-index: var(--fm-z-popper) !important;
+}
+
+.el-notification,
+.el-message {
+  z-index: var(--fm-z-toast) !important;
+  border: 1px solid color-mix(in srgb, var(--fm-border) 82%, var(--fm-glass-edge));
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--fm-glass-edge) 7%, transparent), transparent 42%),
+    color-mix(in srgb, var(--fm-popper-bg) 86%, transparent);
   box-shadow: var(--fm-shadow);
   backdrop-filter: blur(var(--fm-blur)) saturate(1.12);
   -webkit-backdrop-filter: blur(var(--fm-blur)) saturate(1.12);
@@ -102,4 +122,127 @@
 .el-segmented {
   border-color: color-mix(in srgb, var(--fm-border) 74%, var(--fm-glass-edge));
   background: color-mix(in srgb, var(--fm-panel-muted) 54%, transparent);
+}
+
+@media (max-width: 720px) {
+  .el-overlay {
+    padding: 12px;
+  }
+
+  .el-overlay-dialog {
+    display: grid;
+    align-items: center;
+    overflow: hidden;
+  }
+
+  .el-dialog,
+  .el-message-box {
+    width: min(100%, calc(100vw - 24px)) !important;
+    max-width: calc(100vw - 24px);
+    max-height: calc(100dvh - 24px);
+    margin: 0 auto !important;
+    overflow: hidden;
+  }
+
+  .el-dialog {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .el-dialog__header,
+  .el-message-box__header {
+    flex: 0 0 auto;
+    padding: 14px 16px 10px;
+  }
+
+  .el-dialog__body,
+  .el-message-box__content {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: calc(100dvh - 168px);
+    padding: 10px 16px;
+    overflow: auto;
+  }
+
+  .el-dialog__footer,
+  .el-message-box__btns {
+    flex: 0 0 auto;
+    padding: 10px 16px 14px;
+  }
+
+  .el-dialog__footer .dialog-footer,
+  .el-dialog__footer,
+  .el-message-box__btns {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-end;
+  }
+
+  .el-dialog .el-form-item {
+    display: block;
+  }
+
+  .el-dialog .el-form-item__label {
+    justify-content: flex-start;
+    width: auto !important;
+    height: auto;
+    margin-bottom: 6px;
+    line-height: 1.35;
+  }
+
+  .el-dialog .el-form-item__content {
+    margin-left: 0 !important;
+    min-width: 0;
+  }
+
+  .el-dialog .el-input,
+  .el-dialog .el-input-number,
+  .el-dialog .el-select,
+  .el-dialog .el-textarea {
+    width: 100%;
+  }
+
+  .el-drawer.rtl,
+  .el-drawer.ltr {
+    width: min(100%, calc(100vw - 16px)) !important;
+  }
+
+  .el-drawer.ttb,
+  .el-drawer.btt {
+    height: min(92dvh, 720px) !important;
+  }
+
+  .el-drawer__header {
+    margin-bottom: 0;
+    padding: 14px 16px 10px;
+  }
+
+  .el-drawer__body {
+    min-height: 0;
+    padding: 12px 16px 16px;
+    overflow: auto;
+  }
+
+  .el-popper,
+  .el-popover,
+  .el-select__popper,
+  .el-picker__popper,
+  .el-cascader__dropdown,
+  .el-dropdown__popper {
+    max-width: calc(100vw - 24px);
+  }
+
+  .el-select-dropdown,
+  .el-picker-panel,
+  .el-cascader-panel {
+    max-width: calc(100vw - 24px);
+    overflow: auto;
+  }
+
+  .el-notification {
+    width: min(100%, calc(100vw - 24px));
+    right: 12px !important;
+    left: 12px !important;
+  }
 }

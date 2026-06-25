@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { randomUUID } from 'node:crypto'
+import { rmSync } from 'node:fs'
 import { getSqlite } from '../infrastructure/db/sqlite'
 import { enqueue } from './queue'
 import type { BackendScheduleMode } from '../../shared/types/app'
@@ -282,13 +283,83 @@ export function startBatchRun(id: string): void {
 
 export function retryFailedTasks(batchRunId: string): number {
   const db = getSqlite()
+  const now = Date.now()
   const tasks = db.prepare("SELECT id FROM run_tasks WHERE batch_run_id = ? AND status = 'failed'").all(batchRunId) as Array<{ id: string }>
-  for (const task of tasks) {
-    db.prepare("UPDATE run_tasks SET status = 'queued', error_message = NULL, retry_count = retry_count + 1, started_at = NULL, finished_at = NULL WHERE id = ?")
-      .run(task.id)
-    enqueue(task.id)
-  }
+  if (!tasks.length) return 0
+
+  const retry = db.transaction(() => {
+    for (const task of tasks) {
+      db.prepare(`
+        UPDATE run_tasks
+        SET status = 'queued',
+            error_message = NULL,
+            external_task_id = NULL,
+            schedule_decision = NULL,
+            retry_count = retry_count + 1,
+            started_at = NULL,
+            finished_at = NULL,
+            updated_at = ?
+        WHERE id = ?
+      `).run(now, task.id)
+      enqueue(task.id)
+    }
+
+    db.prepare(`
+      UPDATE batch_runs
+      SET status = 'queued',
+          failed_tasks = MAX(failed_tasks - ?, 0),
+          finished_at = NULL,
+          updated_at = ?
+      WHERE id = ?
+    `).run(tasks.length, now, batchRunId)
+  })
+
+  retry()
   return tasks.length
+}
+
+export function deleteBatchRun(id: string): { deletedTasks: number; deletedResults: number } {
+  const db = getSqlite()
+  const batch = getBatchRun(id)
+  if (!batch) return { deletedTasks: 0, deletedResults: 0 }
+  if (['queued', 'running'].includes(batch.status)) {
+    throw new Error('Cannot delete a running or queued batch. Cancel it first.')
+  }
+
+  const taskRows = db.prepare('SELECT id FROM run_tasks WHERE batch_run_id = ?').all(id) as Array<{ id: string }>
+  const resultRows = db.prepare('SELECT storage_driver, storage_key FROM run_results WHERE batch_run_id = ?').all(id) as Array<{
+    storage_driver: string
+    storage_key: string
+  }>
+
+  const remove = db.transaction(() => {
+    for (const task of taskRows) {
+      db.prepare('DELETE FROM task_queue WHERE task_id = ?').run(task.id)
+    }
+    db.prepare('DELETE FROM run_results WHERE batch_run_id = ?').run(id)
+    db.prepare('DELETE FROM run_tasks WHERE batch_run_id = ?').run(id)
+    db.prepare('DELETE FROM batch_runs WHERE id = ?').run(id)
+  })
+
+  remove()
+
+  for (const result of resultRows) {
+    if (result.storage_driver === 'local' && result.storage_key) {
+      try {
+        rmSync(result.storage_key, { force: true })
+      } catch {
+        // Best effort cleanup; database rows are already gone.
+      }
+    }
+  }
+
+  return { deletedTasks: taskRows.length, deletedResults: resultRows.length }
+}
+
+export function countFailedTasks(batchRunId: string): number {
+  const db = getSqlite()
+  const row = db.prepare("SELECT COUNT(*) AS value FROM run_tasks WHERE batch_run_id = ? AND status = 'failed'").get(batchRunId) as { value: number } | undefined
+  return Number(row?.value ?? 0)
 }
 
 function toTaskColumn(key: string) {

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import { unlinkSync, existsSync } from 'node:fs'
+import { rmSync, existsSync } from 'node:fs'
 import { getSqlite } from '../infrastructure/db/sqlite'
 
 export interface RunResult {
@@ -120,7 +120,7 @@ export function hardDeleteResult(id: string) {
   if (!result) return false
 
   if (result.storageDriver === 'local' && existsSync(result.storageKey)) {
-    try { unlinkSync(result.storageKey) } catch { /* non-critical */ }
+    removeLocalFile(result.storageKey)
   }
 
   getSqlite().prepare('DELETE FROM run_results WHERE id = ?').run(id)
@@ -144,7 +144,7 @@ export function batchHardDeleteResults(batchRunId: string) {
 
   for (const row of rows) {
     if (row.storage_driver === 'local' && existsSync(String(row.storage_key))) {
-      try { unlinkSync(String(row.storage_key)) } catch { /* non-critical */ }
+      removeLocalFile(String(row.storage_key))
     }
   }
 
@@ -182,10 +182,14 @@ export function cleanupExpiredResults(daysOld: number) {
 
   for (const row of rows) {
     if (row.storage_driver === 'local' && existsSync(String(row.storage_key))) {
-      try { unlinkSync(String(row.storage_key)) } catch { /* non-critical */ }
+      removeLocalFile(String(row.storage_key))
     }
   }
 
   const result = db.prepare('DELETE FROM run_results WHERE is_deleted = 1 AND deleted_at < ?').run(cutoff)
   return result.changes
+}
+
+function removeLocalFile(path: string) {
+  rmSync(path, { force: true })
 }

@@ -33,6 +33,9 @@
   --fm-mask: rgba(18, 28, 42, 0.28);
   --fm-blur: 22px;
   --fm-radius: 8px;
+  --fm-z-overlay: 2100;
+  --fm-z-popper: 2400;
+  --fm-z-toast: 5000;
   --el-color-mix-bg: #ffffff;
   --el-color-mix-opposite: #000000;
   --el-bg-color: color-mix(in srgb, var(--fm-panel) 86%, transparent);

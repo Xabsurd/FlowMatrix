@@ -38,10 +38,12 @@
     "@nuxt/eslint": "latest",
     "@types/better-sqlite3": "latest",
     "@types/node": "latest",
+    "@unocss/nuxt": "^66.7.2",
     "drizzle-kit": "latest",
     "eslint": "latest",
     "tsx": "latest",
     "typescript": "latest",
+    "unocss": "^66.7.2",
     "vitest": "latest",
     "vue-tsc": "^3.3.5"
   }

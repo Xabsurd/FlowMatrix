@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { createBatchRun, generateMatrix } from '../../../domain/batch'
+import { getBackend } from '../../../domain/backends'
 import { getRequestContext } from '../../../domain/context'
 import type { BackendScheduleMode } from '../../../../shared/types/app'
 
@@ -11,10 +12,21 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, message: 'presetId, workflowId, and matrix are required' })
   }
 
+  const requestedBackendId = body.backendId ? String(body.backendId) : ''
+  if (requestedBackendId) {
+    const backend = getBackend(requestedBackendId)
+    if (!backend || backend.workspaceId !== ctx.workspaceId || backend.type !== 'comfyui') {
+      throw createError({ statusCode: 400, message: '指定的执行后端不存在' })
+    }
+    if (!backend.enabled || backend.paused) {
+      throw createError({ statusCode: 400, message: '指定的执行后端已禁用或暂停' })
+    }
+  }
+
   const matrix = generateMatrix({
     params: body.matrix.params || {},
     mode: body.matrix.mode || 'cartesian'
-  })
+  }).map(row => requestedBackendId ? { ...row, _backendId: requestedBackendId } : row)
 
   return createBatchRun({
     workspaceId: ctx.workspaceId,

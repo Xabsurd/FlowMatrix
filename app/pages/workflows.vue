@@ -18,7 +18,6 @@
           <div class="fm-workflow-copy">
             <div class="fm-workflow-title-row">
               <h3>{{ workflow.name }}</h3>
-              <!-- <ElTag class="fm-slug-tag" size="small" type="info" effect="plain">{{ workflow.slug }}</ElTag> -->
             </div>
             <p class="fm-workflow-purpose">{{ workflowPurpose(workflow) }}</p>
             <p class="fm-workflow-description">{{ workflowDescription(workflow) }}</p>
@@ -45,29 +44,20 @@
         </div>
 
         <div class="fm-workflow-footer">
-          <div class="fm-workflow-tags">
-            <ElSelect
-              v-model="tagDrafts[workflow.id]"
-              multiple
-              filterable
-              allow-create
-              default-first-option
-              :reserve-keyword="false"
-              placeholder="添加标签"
+          <div class="fm-workflow-tags" :class="{ empty: !workflowTags(workflow).length }">
+            <ElTag
+              v-for="tag in workflowTags(workflow)"
+              :key="tag"
               size="small"
-              @change="saveWorkflowTags(workflow)"
+              effect="plain"
             >
-              <ElOption
-                v-for="tag in allTags"
-                :key="tag"
-                :label="tag"
-                :value="tag"
-              />
-            </ElSelect>
+              {{ tag }}
+            </ElTag>
+            <span v-if="!workflowTags(workflow).length">暂无标签</span>
           </div>
           <div class="fm-card-actions">
-            <ElButton text @click="openEditDialog(workflow)">编辑</ElButton>
-            <ElButton text type="danger" @click="removeWorkflow(workflow)">删除</ElButton>
+            <ElButton text :size="rowActionSize" @click="openEditDialog(workflow)">编辑</ElButton>
+            <ElButton text :size="rowActionSize" type="danger" @click="removeWorkflow(workflow)">删除</ElButton>
           </div>
         </div>
       </article>
@@ -100,7 +90,42 @@
           </ElSelect>
         </ElFormItem>
         <ElFormItem label="JSON 文件">
+          <div v-if="hasWorkflowJson" class="fm-uploaded-file">
+            <div class="fm-uploaded-file-main">
+              <div class="fm-uploaded-file-mark">JSON</div>
+              <div class="fm-uploaded-file-copy">
+                <strong>{{ form.fileName || '已导入工作流 JSON' }}</strong>
+                <span>{{ workflowFileSummary }}</span>
+              </div>
+            </div>
+            <div class="fm-uploaded-file-facts">
+              <div>
+                <span>大小</span>
+                <strong>{{ formatBytes(currentWorkflowJsonSize) }}</strong>
+              </div>
+              <div>
+                <span>节点</span>
+                <strong>{{ uploadedJsonInfo.nodeCount }}</strong>
+              </div>
+              <div>
+                <span>输入</span>
+                <strong>{{ uploadedJsonInfo.inputCount }}</strong>
+              </div>
+            </div>
+            <div class="fm-uploaded-file-actions">
+              <ElUpload
+                :auto-upload="false"
+                :show-file-list="false"
+                accept=".json,application/json"
+                :on-change="readWorkflowFile"
+              >
+                <ElButton :size="rowActionSize">重新上传</ElButton>
+              </ElUpload>
+              <ElButton :size="rowActionSize" type="danger" plain @click="clearWorkflowFile">删除文件</ElButton>
+            </div>
+          </div>
           <ElUpload
+            v-else
             class="fm-workflow-upload"
             drag
             :auto-upload="false"
@@ -137,6 +162,8 @@
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { UploadFile } from 'element-plus'
 
+const { rowActionSize } = useUiPreferences()
+
 interface ParsedNode {
   nodeId: string
   nodeType: string
@@ -160,11 +187,13 @@ const loading = ref(false)
 const saving = ref(false)
 const showUploadDialog = ref(false)
 const editingId = ref('')
-const tagDrafts = reactive<Record<string, string[]>>({})
 const form = reactive({
   name: '',
   jsonText: '',
-  tags: [] as string[]
+  tags: [] as string[],
+  fileName: '',
+  fileSize: 0,
+  fileUpdatedAt: 0
 })
 
 const allTags = computed(() => {
@@ -175,12 +204,32 @@ const allTags = computed(() => {
   for (const tag of form.tags) tags.add(tag)
   return Array.from(tags).sort((a, b) => a.localeCompare(b, 'zh-CN'))
 })
+const hasWorkflowJson = computed(() => Boolean(form.jsonText.trim()))
+const currentWorkflowJsonSize = computed(() => new Blob([form.jsonText]).size)
+const uploadedJsonInfo = computed(() => {
+  try {
+    const raw = JSON.parse(form.jsonText) as Record<string, unknown>
+    const nodes = Object.values(raw).filter(value => value && typeof value === 'object') as Array<Record<string, unknown>>
+    return {
+      nodeCount: nodes.length,
+      inputCount: nodes.reduce((sum, node) => {
+        const inputs = node.inputs
+        return sum + (inputs && typeof inputs === 'object' ? Object.keys(inputs).length : 0)
+      }, 0)
+    }
+  } catch {
+    return { nodeCount: '-', inputCount: '-' }
+  }
+})
+const workflowFileSummary = computed(() => {
+  const updatedAt = form.fileUpdatedAt ? formatTime(form.fileUpdatedAt) : '刚刚'
+  return `${formatBytes(currentWorkflowJsonSize.value)} · ${updatedAt}`
+})
 
 async function fetchWorkflows() {
   loading.value = true
   try {
     workflows.value = await $fetch<Workflow[]>('/api/v1/workflows')
-    syncTagDrafts()
   } finally {
     loading.value = false
   }
@@ -191,6 +240,9 @@ function openUploadDialog() {
   form.name = ''
   form.jsonText = ''
   form.tags = []
+  form.fileName = ''
+  form.fileSize = 0
+  form.fileUpdatedAt = 0
   showUploadDialog.value = true
 }
 
@@ -199,6 +251,9 @@ function openEditDialog(workflow: Workflow) {
   form.name = workflow.name
   form.jsonText = JSON.stringify(workflow.rawJson || {}, null, 2)
   form.tags = [...workflowTags(workflow)]
+  form.fileName = `${workflow.name}.json`
+  form.fileSize = new Blob([form.jsonText]).size
+  form.fileUpdatedAt = workflow.updatedAt
   showUploadDialog.value = true
 }
 
@@ -207,9 +262,19 @@ async function readWorkflowFile(file: UploadFile) {
   if (!raw) return
   const text = await raw.text()
   form.jsonText = text
+  form.fileName = file.name
+  form.fileSize = raw.size
+  form.fileUpdatedAt = raw.lastModified || Date.now()
   if (!form.name) {
     form.name = file.name.replace(/\.json$/i, '')
   }
+}
+
+function clearWorkflowFile() {
+  form.jsonText = ''
+  form.fileName = ''
+  form.fileSize = 0
+  form.fileUpdatedAt = 0
 }
 
 async function saveWorkflow() {
@@ -245,25 +310,6 @@ async function saveWorkflow() {
     ElMessage.error(error instanceof Error ? error.message : '保存失败')
   } finally {
     saving.value = false
-  }
-}
-
-async function saveWorkflowTags(workflow: Workflow) {
-  const tags = normalizeTags(tagDrafts[workflow.id] || [])
-  tagDrafts[workflow.id] = tags
-  try {
-    const updated = await $fetch<Workflow>(`/api/v1/workflows/${workflow.id}`, {
-      method: 'PATCH',
-      body: {
-        metadata: { tags }
-      }
-    })
-    const index = workflows.value.findIndex(item => item.id === workflow.id)
-    if (index >= 0) workflows.value[index] = updated
-    tagDrafts[workflow.id] = workflowTags(updated)
-  } catch (error: unknown) {
-    tagDrafts[workflow.id] = workflowTags(workflow)
-    ElMessage.error(error instanceof Error ? error.message : '标签保存失败')
   }
 }
 
@@ -320,6 +366,10 @@ function workflowDescription(workflow: Workflow) {
 
 function formatJsonSize(value: Record<string, unknown>) {
   const bytes = new Blob([JSON.stringify(value || {})]).size
+  return formatBytes(bytes)
+}
+
+function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
@@ -334,16 +384,6 @@ function normalizeTags(tags: unknown[]) {
   return Array.from(new Set(tags
     .map(tag => String(tag).trim())
     .filter(Boolean)))
-}
-
-function syncTagDrafts() {
-  const activeIds = new Set(workflows.value.map(workflow => workflow.id))
-  for (const workflow of workflows.value) {
-    tagDrafts[workflow.id] = workflowTags(workflow)
-  }
-  for (const id of Object.keys(tagDrafts)) {
-    if (!activeIds.has(id)) Reflect.deleteProperty(tagDrafts, id)
-  }
 }
 
 onMounted(fetchWorkflows)
@@ -363,9 +403,10 @@ onMounted(fetchWorkflows)
 .fm-workflow-facts div { display: grid; gap: 5px; min-width: 0; padding: 10px; border: 1px solid var(--fm-border); border-radius: var(--fm-radius); background: color-mix(in srgb, var(--fm-panel-muted) 70%, transparent); }
 .fm-workflow-facts span { color: var(--fm-muted); font-size: 12px; }
 .fm-workflow-facts strong { overflow: hidden; color: var(--fm-text); font-size: 13px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-.fm-workflow-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid var(--fm-border); padding-top: 12px; }
-.fm-workflow-tags { min-width: min(100%, 320px); flex: 1; }
-.fm-workflow-tags :deep(.el-select) { width: 100%; }
+.fm-workflow-footer { display: grid; gap: 10px; border-top: 1px solid var(--fm-border); padding-top: 12px; }
+.fm-workflow-tags { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.fm-workflow-tags.empty { color: var(--fm-muted); font-size: 12px; }
+.fm-card-actions { display: flex; justify-self: end; flex: 0 0 auto; align-items: center; gap: 6px; }
 .fm-slug-tag { max-width: min(360px, 42vw); }
 .fm-slug-tag :deep(.el-tag__content) {
   overflow: hidden;
@@ -386,22 +427,105 @@ onMounted(fetchWorkflows)
   justify-self: center;
   color: var(--fm-muted);
 }
+.fm-uploaded-file {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--fm-primary) 28%, var(--fm-border));
+  border-radius: var(--fm-radius);
+  background: color-mix(in srgb, var(--fm-primary) 8%, var(--fm-panel-muted));
+}
+.fm-uploaded-file-main {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+.fm-uploaded-file-mark {
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  border: 1px solid var(--fm-border);
+  border-radius: var(--fm-radius);
+  background: color-mix(in srgb, var(--fm-primary) 16%, transparent);
+  color: var(--fm-text);
+  font-size: 12px;
+  font-weight: 800;
+}
+.fm-uploaded-file-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.fm-uploaded-file-copy strong {
+  overflow: hidden;
+  color: var(--fm-text);
+  font-size: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fm-uploaded-file-copy span {
+  color: var(--fm-muted);
+  font-size: 12px;
+}
+.fm-uploaded-file-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.fm-uploaded-file-facts div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid var(--fm-border);
+  border-radius: var(--fm-radius);
+  background: color-mix(in srgb, var(--fm-panel) 62%, transparent);
+}
+.fm-uploaded-file-facts span {
+  color: var(--fm-muted);
+  font-size: 12px;
+}
+.fm-uploaded-file-facts strong {
+  overflow: hidden;
+  color: var(--fm-text);
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fm-uploaded-file-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 .fm-json-collapse {
-  border-top: 1px solid var(--fm-border);
-  border-bottom: 1px solid var(--fm-border);
+  overflow: hidden;
+  border: 1px solid var(--fm-border);
+  border-radius: var(--fm-radius);
+  background: color-mix(in srgb, var(--fm-panel-muted) 58%, transparent);
 }
 .fm-json-collapse :deep(.el-collapse-item__header) {
-  padding: 0 2px;
+  padding: 0 12px;
+  border-bottom-color: var(--fm-border);
+  background: transparent;
   color: var(--fm-muted);
   font-weight: 650;
 }
 .fm-json-collapse :deep(.el-collapse-item__content) {
-  padding-bottom: 0;
+  padding: 12px;
+  background: transparent;
+}
+.fm-json-collapse :deep(.el-collapse-item__wrap) {
+  border-bottom: 0;
+  background: transparent;
 }
 @media (max-width: 720px) {
   .fm-workflow-list { grid-template-columns: 1fr; }
   .fm-workflow-main { grid-template-columns: 1fr; }
   .fm-workflow-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .fm-workflow-footer { align-items: flex-start; flex-direction: column; }
+  .fm-workflow-footer { grid-template-columns: 1fr; }
+  .fm-uploaded-file-facts { grid-template-columns: 1fr; }
 }
 </style>

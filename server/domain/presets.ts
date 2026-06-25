@@ -12,6 +12,7 @@ export interface CallPresetRow {
   slug: string
   description: string | null
   nodeParams: NodeParamMapping[]
+  outputNodes: OutputNodeMapping[]
   scheduleMode: string
   metadata: Record<string, unknown> | null
   createdAt: number
@@ -29,12 +30,22 @@ export interface NodeParamMapping {
   options?: unknown[]
 }
 
+export interface OutputNodeMapping {
+  nodeId: string
+  nodeType: string
+  title?: string
+  enabled: boolean
+}
+
 function safeJson<T>(val: string | null | undefined, fallback: T): T {
   if (!val) return fallback
   try { return JSON.parse(val) as T } catch { return fallback }
 }
 
 function rowToPreset(row: Record<string, unknown>): CallPresetRow {
+  const metadata = safeJson<Record<string, unknown>>(row.metadata as string, {})
+  const outputNodes = Array.isArray(metadata.outputNodes) ? metadata.outputNodes as OutputNodeMapping[] : []
+
   return {
     id: row.id as string,
     workspaceId: row.workspace_id as string,
@@ -45,8 +56,9 @@ function rowToPreset(row: Record<string, unknown>): CallPresetRow {
     slug: row.slug as string,
     description: (row.description as string) ?? null,
     nodeParams: safeJson(row.node_params as string, []),
+    outputNodes,
     scheduleMode: (row.schedule_mode as string) ?? 'idle-first',
-    metadata: safeJson(row.metadata as string, null),
+    metadata,
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at)
   }
@@ -57,6 +69,7 @@ export function createPreset(input: {
   workflowId: string
   name: string
   nodeParams: NodeParamMapping[]
+  outputNodes?: OutputNodeMapping[]
   backendId?: string
   backendGroupId?: string
   description?: string
@@ -77,7 +90,7 @@ export function createPreset(input: {
     input.name, slug, input.description ?? null,
     JSON.stringify(input.nodeParams),
     input.scheduleMode ?? 'idle-first',
-    JSON.stringify(input.metadata ?? {}),
+    JSON.stringify({ ...(input.metadata ?? {}), outputNodes: input.outputNodes ?? [] }),
     now, now
   )
   return getPreset(id)!
@@ -99,9 +112,11 @@ export function updatePreset(id: string, patch: Partial<{
   name: string
   description: string
   nodeParams: NodeParamMapping[]
+  outputNodes: OutputNodeMapping[]
   backendId: string | null
   backendGroupId: string | null
   scheduleMode: string
+  metadata: Record<string, unknown> | null
 }>): CallPresetRow | null {
   const existing = getPreset(id)
   if (!existing) return null
@@ -115,6 +130,14 @@ export function updatePreset(id: string, patch: Partial<{
   if (patch.backendId !== undefined) { sets.push('backend_id = ?'); vals.push(patch.backendId) }
   if (patch.backendGroupId !== undefined) { sets.push('backend_group_id = ?'); vals.push(patch.backendGroupId) }
   if (patch.scheduleMode !== undefined) { sets.push('schedule_mode = ?'); vals.push(patch.scheduleMode) }
+  if (patch.outputNodes !== undefined || patch.metadata !== undefined) {
+    sets.push('metadata = ?')
+    vals.push(JSON.stringify({
+      ...(existing.metadata ?? {}),
+      ...(patch.metadata ?? {}),
+      ...(patch.outputNodes !== undefined ? { outputNodes: patch.outputNodes } : {})
+    }))
+  }
 
   if (sets.length === 0) return existing
   sets.push('updated_at = ?')
@@ -143,6 +166,7 @@ export function inferParamType(nodeType: string, inputName: string, inputSpec: u
   // Check by node type + input name first for well-known ComfyUI nodes
   const wellKnown = WELL_KNOWN_PARAMS[`${nodeType}.${inputName}`]
   if (wellKnown) return wellKnown
+  if (inputName === 'value' && /^Primitive/i.test(nodeType)) return inferPrimitiveParamType(nodeType)
 
   // Infer from input spec
   if (typeof inputSpec === 'object' && inputSpec !== null) {
@@ -168,6 +192,13 @@ export function inferParamType(nodeType: string, inputName: string, inputSpec: u
   }
 
   return { inferredType: 'STRING', controlType: 'text' }
+}
+
+function inferPrimitiveParamType(nodeType: string) {
+  if (/Primitive(Boolean|Bool)/i.test(nodeType)) return { inferredType: 'BOOLEAN', controlType: 'switch' }
+  if (/Primitive(Float|Number)/i.test(nodeType)) return { inferredType: 'FLOAT', controlType: 'number' }
+  if (/Primitive(Int|Integer)/i.test(nodeType)) return { inferredType: 'INT', controlType: 'number' }
+  return { inferredType: 'STRING', controlType: 'textarea' }
 }
 
 const WELL_KNOWN_PARAMS: Record<string, { inferredType: string; controlType: string }> = {

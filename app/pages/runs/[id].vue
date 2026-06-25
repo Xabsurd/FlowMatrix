@@ -2,8 +2,11 @@
 <script setup lang="ts">
 import { ElMessage, ElMessageBox } from 'element-plus'
 
+const COPIED_TASK_STORAGE_KEY = 'flowmatrix.copied-task'
+
 const route = useRoute()
 const router = useRouter()
+const { rowActionSize } = useUiPreferences()
 
 interface Task {
   id: string
@@ -45,6 +48,11 @@ interface BatchDetail {
   finishedAt: number | null
   tasks: Task[]
   results: ResultFile[]
+  taskPage: {
+    limit: number
+    offset: number
+    total: number
+  }
   resultStats: {
     totalCount: number
     activeCount: number
@@ -55,19 +63,27 @@ interface BatchDetail {
 
 const detail = ref<BatchDetail | null>(null)
 const loading = ref(false)
+const retrying = ref(false)
 const polling = ref<NodeJS.Timeout | null>(null)
+const expandedTaskIds = ref<string[]>([])
+const taskPage = reactive({
+  page: 1,
+  limit: 50
+})
 
-// Lightbox modal state
 const lightboxVisible = ref(false)
 const activeResult = ref<ResultFile | null>(null)
 
 async function fetchDetail(quiet = false) {
   if (!quiet) loading.value = true
   try {
-    const data = await $fetch<BatchDetail>(`/api/v1/batch/${route.params.id}`)
+    const params = new URLSearchParams({
+      taskLimit: String(taskPage.limit),
+      taskOffset: String((taskPage.page - 1) * taskPage.limit)
+    })
+    const data = await $fetch<BatchDetail>(`/api/v1/batch/${route.params.id}?${params}`)
     detail.value = data
     
-    // Stop polling if the batch is in a terminal state
     if (['completed', 'failed', 'canceled'].includes(data.status)) {
       stopPolling()
     } else {
@@ -78,6 +94,12 @@ async function fetchDetail(quiet = false) {
   } finally {
     if (!quiet) loading.value = false
   }
+}
+
+function handleTaskPageChange(page: number) {
+  taskPage.page = page
+  expandedTaskIds.value = []
+  void fetchDetail()
 }
 
 function startPolling() {
@@ -109,12 +131,20 @@ async function cancelBatch() {
 
 async function retryFailed() {
   if (!detail.value) return
+  retrying.value = true
   try {
     const result = await $fetch<{ count: number }>(`/api/v1/batch/${detail.value.id}/retry`, { method: 'POST' })
-    ElMessage.success(`已重新推入 ${result.count} 个失败任务`)
+    if (result.count > 0) {
+      ElMessage.success(`已重新推入 ${result.count} 个失败任务`)
+      startPolling()
+    } else {
+      ElMessage.warning('没有可重试的失败任务')
+    }
     await fetchDetail()
   } catch (error: unknown) {
     ElMessage.error(error instanceof Error ? error.message : '重试失败')
+  } finally {
+    retrying.value = false
   }
 }
 
@@ -124,6 +154,25 @@ function getTaskResults(taskId: string) {
 
 function visibleInputParams(inputParams: Record<string, unknown>) {
   return Object.entries(inputParams).filter(([key]) => !key.startsWith('_'))
+}
+
+function taskParamSummary(task: Task) {
+  const params = visibleInputParams(task.inputParams)
+  if (!params.length) return '无运行参数'
+  return params
+    .slice(0, 3)
+    .map(([key, value]) => `${key.split('.').pop()}: ${typeof value === 'object' ? '文件/资源' : String(value)}`)
+    .join(' · ')
+}
+
+function isTaskExpanded(taskId: string) {
+  return expandedTaskIds.value.includes(taskId)
+}
+
+function toggleTask(taskId: string) {
+  expandedTaskIds.value = isTaskExpanded(taskId)
+    ? expandedTaskIds.value.filter(id => id !== taskId)
+    : [...expandedTaskIds.value, taskId]
 }
 
 function getStatusType(status: string) {
@@ -159,6 +208,21 @@ function downloadResult(id: string) {
   globalThis.window?.open(`/api/v1/results/${id}/file?download`)
 }
 
+function backToRun() {
+  void router.push(detail.value?.id ? `/gallery?batchRunId=${detail.value.id}` : '/gallery')
+}
+
+function copyTaskToRun(task: Task) {
+  if (!import.meta.client) return
+  const inputParams = Object.fromEntries(visibleInputParams(task.inputParams))
+  sessionStorage.setItem(COPIED_TASK_STORAGE_KEY, JSON.stringify({
+    presetId: task.presetId,
+    inputParams
+  }))
+  ElMessage.success('已复制任务参数，正在返回运行页')
+  void router.push(`/runs?presetId=${task.presetId}`)
+}
+
 function formatDuration(row: unknown) {
   const task = row as Pick<Task, 'startedAt' | 'finishedAt'>
   if (!task.startedAt) return '-'
@@ -192,12 +256,13 @@ onBeforeUnmount(() => {
   <section class="fm-page">
     <div class="fm-page-header">
       <div class="header-main">
-        <ElButton size="small" class="back-btn" @click="router.push('/runs')">
-          返回运行
-        </ElButton>
+        <button class="back-link" type="button" @click="backToRun">
+          <FmIcon name="arrowLeft" :size="16" />
+          返回结果
+        </button>
         <div class="title-row">
           <h1 class="fm-page-title">
-            {{ detail?.name || (detail ? `批次运行 #${detail.id.slice(0, 8)}` : '加载中...') }}
+            {{ detail?.name || (detail ? `运行队列 #${detail.id.slice(0, 8)}` : '加载中...') }}
           </h1>
           <ElTag v-if="detail" :type="getStatusType(detail.status)" effect="dark">
             {{ getStatusLabel(detail.status) }}
@@ -218,6 +283,7 @@ onBeforeUnmount(() => {
         <ElButton
           v-if="detail.status === 'failed' || detail.failedTasks > 0"
           type="warning"
+          :loading="retrying"
           @click="retryFailed"
         >
           重试失败任务
@@ -227,7 +293,6 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-if="detail" class="fm-grid two top-cards">
-      <!-- Progress Card -->
       <div class="fm-card progress-card">
         <h3>执行进度</h3>
         <div class="progress-bar-wrapper">
@@ -266,7 +331,6 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <!-- Settings summary -->
       <div class="fm-card config-card">
         <h3>运行摘要</h3>
         <ElDescriptions :column="1" border class="fm-descriptions">
@@ -286,69 +350,83 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- Tasks table -->
     <div v-if="detail" class="tasks-container fm-panel">
       <div class="panel-header">
-        <h3>任务列表</h3>
+        <h3>队列任务</h3>
+        <span>第 {{ detail.taskPage.offset + 1 }} - {{ Math.min(detail.taskPage.offset + detail.tasks.length, detail.taskPage.total) }} 个，共 {{ detail.taskPage.total }} 个任务</span>
       </div>
-      <ElTable :data="detail.tasks" style="width: 100%" class="fm-table-view">
-        <ElTableColumn label="索引" width="70">
-          <template #default="{ $index }">
-            <span class="mono">#{{ $index + 1 }}</span>
-          </template>
-        </ElTableColumn>
-        <ElTableColumn label="参数" min-width="260">
-          <template #default="{ row }">
-            <div class="params-column">
-              <div v-for="[k, v] in visibleInputParams(row.inputParams)" :key="k" class="param-badge">
-                <span class="p-key">{{ k.split('.').pop() }}</span>
-                <span class="p-val" :title="String(v)">{{ typeof v === 'object' ? '文件/资源' : String(v) }}</span>
-              </div>
-            </div>
-          </template>
-        </ElTableColumn>
-        <ElTableColumn label="状态" width="100">
-          <template #default="{ row }">
-            <ElTag :type="getStatusType(row.status)" size="small" effect="light">
-              {{ getStatusLabel(row.status) }}
+      <div class="queue-task-list">
+        <article
+          v-for="(task, index) in detail.tasks"
+          :key="task.id"
+          class="queue-task"
+          :class="{ expanded: isTaskExpanded(task.id) }"
+        >
+          <button class="queue-task-summary" type="button" @click="toggleTask(task.id)">
+            <span class="queue-index mono">#{{ index + 1 }}</span>
+            <span class="queue-param" :title="taskParamSummary(task)">
+              {{ taskParamSummary(task) }}
+            </span>
+            <ElTag :type="getStatusType(task.status)" size="small" effect="light">
+              {{ getStatusLabel(task.status) }}
             </ElTag>
-          </template>
-        </ElTableColumn>
-        <ElTableColumn label="执行后端" width="140">
-          <template #default="{ row }">
-            <span v-if="row.backendId" class="mono">{{ row.backendId.slice(0, 8) }}</span>
-            <span v-else class="text-muted">-</span>
-          </template>
-        </ElTableColumn>
-        <ElTableColumn label="耗时" width="90">
-          <template #default="{ row }">
-            <span>{{ formatDuration(row) }}</span>
-          </template>
-        </ElTableColumn>
-        <ElTableColumn label="结果 / 错误" min-width="240">
-          <template #default="{ row }">
-            <div v-if="row.status === 'succeeded'" class="outputs-list">
-              <div
-                v-for="res in getTaskResults(row.id)"
-                :key="res.id"
-                class="thumbnail-wrapper"
-                @click="showLightbox(res)"
-              >
-                <img :src="`/api/v1/results/${res.id}/file`" class="thumbnail-img" >
+            <span class="queue-meta">
+              <span v-if="task.backendId" class="mono">{{ task.backendId.slice(0, 8) }}</span>
+              <span v-else>-</span>
+              <span>{{ formatDuration(task) }}</span>
+              <span>{{ getTaskResults(task.id).length }} 个结果</span>
+            </span>
+            <FmIcon :name="isTaskExpanded(task.id) ? 'chevronUp' : 'chevronDown'" />
+          </button>
+
+          <div v-if="isTaskExpanded(task.id)" class="queue-task-detail">
+            <section>
+              <div class="detail-section-head">
+                <h4>运行参数</h4>
+                <ElButton :size="rowActionSize" @click="copyTaskToRun(task)">复制任务</ElButton>
               </div>
-            </div>
-            <div v-else-if="row.status === 'failed'" class="error-wrapper">
-              <span class="error-msg" :title="row.errorMessage || ''">
-                {{ row.errorMessage || '未知执行错误' }}
-              </span>
-            </div>
-            <span v-else class="text-muted">-</span>
-          </template>
-        </ElTableColumn>
-      </ElTable>
+              <div class="params-column">
+                <div v-for="[k, v] in visibleInputParams(task.inputParams)" :key="k" class="param-badge">
+                  <span class="p-key">{{ k.split('.').pop() }}</span>
+                  <span class="p-val" :title="String(v)">{{ typeof v === 'object' ? '文件/资源' : String(v) }}</span>
+                </div>
+              </div>
+            </section>
+
+            <section>
+              <h4>结果 / 错误</h4>
+              <div v-if="task.status === 'succeeded' && getTaskResults(task.id).length" class="outputs-list">
+                <div
+                  v-for="res in getTaskResults(task.id)"
+                  :key="res.id"
+                  class="thumbnail-wrapper"
+                  @click="showLightbox(res)"
+                >
+                  <img :src="`/api/v1/results/${res.id}/file`" class="thumbnail-img" >
+                </div>
+              </div>
+              <div v-else-if="task.status === 'failed'" class="error-wrapper">
+                <span class="error-msg" :title="task.errorMessage || ''">
+                  {{ task.errorMessage || '未知执行错误' }}
+                </span>
+              </div>
+              <span v-else class="text-muted">暂无输出</span>
+            </section>
+          </div>
+        </article>
+      </div>
+      <div v-if="detail.taskPage.total > taskPage.limit" class="task-pagination">
+        <ElPagination
+          v-model:current-page="taskPage.page"
+          background
+          layout="prev, pager, next"
+          :total="detail.taskPage.total"
+          :page-size="taskPage.limit"
+          @current-change="handleTaskPageChange"
+        />
+      </div>
     </div>
 
-    <!-- Lightbox dialog -->
     <ElDialog
       v-model="lightboxVisible"
       title="生成结果详情"
@@ -399,8 +477,33 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.back-btn {
-  margin-bottom: 12px;
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 6px;
+  width: auto;
+  margin: 0 0 10px;
+  padding: 6px 0;
+  border: 0;
+  background: transparent;
+  color: var(--fm-muted);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 160ms ease, transform 160ms ease;
+}
+
+.back-link:hover {
+  color: var(--fm-text);
+  transform: translateX(-2px);
+}
+
+.back-link:focus-visible {
+  border-radius: 6px;
+  outline: 2px solid color-mix(in srgb, var(--fm-primary) 42%, transparent);
+  outline-offset: 3px;
 }
 
 .header-main {
@@ -474,9 +577,114 @@ onBeforeUnmount(() => {
 }
 
 .panel-header h3 {
-  margin: 0 0 16px;
+  margin: 0;
   color: var(--fm-text);
   font-size: 16px;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.panel-header span {
+  color: var(--fm-muted);
+  font-size: 12px;
+}
+
+.queue-task-list {
+  display: grid;
+  gap: 8px;
+}
+
+.task-pagination {
+  display: flex;
+  justify-content: center;
+  margin-top: 14px;
+}
+
+.queue-task {
+  border: 1px solid var(--fm-border);
+  border-radius: var(--fm-radius);
+  background: color-mix(in srgb, var(--fm-panel-muted) 68%, transparent);
+  overflow: hidden;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.queue-task.expanded {
+  border-color: color-mix(in srgb, var(--fm-primary) 32%, var(--fm-border));
+  background: color-mix(in srgb, var(--fm-primary) 7%, var(--fm-panel-muted));
+}
+
+.queue-task-summary {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto minmax(260px, auto) 24px;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 0;
+  background: transparent;
+  color: var(--fm-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.queue-task-summary:hover {
+  background: color-mix(in srgb, var(--fm-primary) 8%, transparent);
+}
+
+.queue-index {
+  color: var(--fm-muted);
+}
+
+.queue-param {
+  overflow: hidden;
+  color: var(--fm-text);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queue-meta {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  color: var(--fm-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.queue-task-detail {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(240px, 0.8fr);
+  gap: 16px;
+  padding: 0 14px 14px 98px;
+}
+
+.queue-task-detail section {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.queue-task-detail h4 {
+  margin: 0;
+  color: var(--fm-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.detail-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
 }
 
 .params-column {
@@ -550,7 +758,6 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-/* Lightbox styles */
 .lightbox-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
@@ -625,6 +832,35 @@ onBeforeUnmount(() => {
 @media (max-width: 760px) {
   .lightbox-layout {
     grid-template-columns: 1fr;
+  }
+
+  .panel-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .queue-task-summary {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .queue-task-summary .el-tag,
+  .queue-meta {
+    grid-column: 2 / -1;
+  }
+
+  .queue-meta {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .queue-task-summary svg {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .queue-task-detail {
+    grid-template-columns: 1fr;
+    padding-left: 14px;
   }
 }
 </style>

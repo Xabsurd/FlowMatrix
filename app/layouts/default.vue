@@ -253,7 +253,6 @@ onMounted(() => {
 
 .main {
   position: relative;
-  z-index: 0;
   min-width: 0;
   padding: 10px 4px 36px;
 }

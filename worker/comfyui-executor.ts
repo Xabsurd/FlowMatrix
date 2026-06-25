@@ -21,33 +21,33 @@ export async function executeComfyUITask(taskId: string): Promise<void> {
   const workflowId = task.workflow_id as string
   const presetId = task.preset_id as string
   const inputParams = JSON.parse((task.input_params as string) || '{}')
+  const requestedBackendId = typeof inputParams._backendId === 'string' ? inputParams._backendId : undefined
   const batchRunId = task.batch_run_id as string
   const workspaceId = task.workspace_id as string
 
-  // Load workflow and preset
   const workflow = getWorkflow(workflowId)
   if (!workflow) throw new Error(`Workflow ${workflowId} not found`)
 
   const preset = getPreset(presetId)
   const scheduleMode = (preset?.scheduleMode || 'idle-first') as BackendScheduleMode
 
-  // Build required resources from input params (model references)
   const requiredResources = extractRequiredResources(inputParams, preset?.nodeParams || [])
 
-  // Select backend
   const decision = selectBackend({
-    backendIds: preset?.backendId ? [preset.backendId] : undefined,
-    groupId: preset?.backendGroupId || undefined,
+    backendIds: requestedBackendId ? [requestedBackendId] : preset?.backendId ? [preset.backendId] : undefined,
+    groupId: requestedBackendId ? undefined : preset?.backendGroupId || undefined,
     requiredResources,
     mode: scheduleMode
   }, workspaceId)
 
   if (!decision.backendId) {
-    throw new Error(`No eligible backend: ${decision.reasons.join(', ')}`)
+    const rejected = decision.rejectedBackends?.length
+      ? `; rejected: ${decision.rejectedBackends.map(item => `${item.backendId.slice(0, 8)} ${item.reason}`).join('; ')}`
+      : ''
+    throw new Error(`No eligible backend: ${decision.reasons.join(', ')}${rejected}`)
   }
 
-  // Update task with schedule decision
-  updateTaskStatus(taskId, 'running', {
+  updateTaskStatus(taskId, 'queued', {
     backendId: decision.backendId,
     scheduleDecision: decision
   })
@@ -57,15 +57,12 @@ export async function executeComfyUITask(taskId: string): Promise<void> {
 
   const endpoint = (backend.endpoint as string).endsWith('/') ? (backend.endpoint as string).slice(0, -1) : (backend.endpoint as string)
 
-  // Apply parameter substitutions to workflow
   const rawWorkflow = JSON.parse(JSON.stringify(workflow.rawJson))
   const patchedWorkflow = await applyParams(rawWorkflow, inputParams, preset?.nodeParams || [], endpoint)
 
-  // Extract model signature for future affinity
   const sig = comfyui.extractModelSignature(patchedWorkflow)
   updateBackendModelSignature(decision.backendId, sig)
 
-  // Submit prompt
   const clientId = `flowmatrix-${taskId}`
   let promptResponse: comfyui.ComfyUIPromptResponse
   try {
@@ -75,25 +72,20 @@ export async function executeComfyUITask(taskId: string): Promise<void> {
     throw error
   }
 
-  updateTaskStatus(taskId, 'running', { externalTaskId: promptResponse.prompt_id })
+  updateTaskStatus(taskId, 'queued', { externalTaskId: promptResponse.prompt_id })
 
-  // Poll for completion
   let history: comfyui.ComfyUIHistoryItem | null = null
-  const timeoutMs = (task.timeout_seconds as number || 300) * 1000
-  const startTime = Date.now()
 
   while (!history) {
-    if (Date.now() - startTime > timeoutMs) {
-      throw new Error(`Task timed out after ${timeoutMs / 1000}s`)
-    }
     await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS))
 
-    // Check if task is canceled in database
     const currentTask = db.prepare('SELECT status FROM run_tasks WHERE id = ?').get(taskId) as { status: string } | undefined
     if (currentTask && (currentTask.status === 'canceled' || currentTask.status === 'canceling')) {
       try {
         await comfyui.interruptPrompt(endpoint)
-      } catch { /* ignore */ }
+      } catch (error) {
+        if (error instanceof Error) markBackendUnhealthy(decision.backendId)
+      }
       throw new Error('Task was canceled by user')
     }
 
@@ -101,30 +93,43 @@ export async function executeComfyUITask(taskId: string): Promise<void> {
       history = await comfyui.getHistory(endpoint, promptResponse.prompt_id)
       if (history && !history.status.completed) history = null
     } catch {
-      // Transient error, keep polling
+      history = null
     }
 
-    // Update backend load from queue info
     try {
       const q = await comfyui.getQueueInfo(endpoint)
-      updateBackendLoad(decision.backendId, q.exec_info.queue_running, q.exec_info.queue_pending)
-    } catch { /* non-critical */ }
+      const counts = comfyui.getQueueCounts(q)
+      const queueState = comfyui.getPromptQueueState(q, promptResponse.prompt_id)
+      updateBackendLoad(decision.backendId, counts.running, counts.pending)
+      if (queueState === 'running') {
+        updateTaskStatus(taskId, 'running')
+      } else if (queueState === 'pending') {
+        updateTaskStatus(taskId, 'queued')
+      }
+    } catch (error) {
+      if (error instanceof Error && /ECONNREFUSED|ENOTFOUND|timed out/i.test(error.message)) {
+        markBackendUnhealthy(decision.backendId)
+      }
+    }
   }
 
-  // Check for errors
   if (history.status.status_str === 'error') {
     const errorMsg = history.status.messages.map(m => JSON.stringify(m)).join('\n')
     throw new Error(`ComfyUI error: ${errorMsg}`)
   }
 
-  // Download and save outputs
   if (!existsSync(OUTPUT_DIR)) mkdirSync(OUTPUT_DIR, { recursive: true })
   const taskOutputDir = join(OUTPUT_DIR, taskId)
   if (!existsSync(taskOutputDir)) mkdirSync(taskOutputDir, { recursive: true })
 
   const results: Array<{ filename: string; path: string; type: string; size: number }> = []
+  const enabledOutputNodes = new Set((preset?.outputNodes || [])
+    .filter(node => node.enabled)
+    .map(node => node.nodeId))
 
   for (const [nodeId, output] of Object.entries(history.outputs)) {
+    if (preset?.outputNodes?.length && !enabledOutputNodes.has(nodeId)) continue
+
     if (output.images) {
       for (let i = 0; i < output.images.length; i++) {
         const img = output.images[i]
@@ -133,7 +138,6 @@ export async function executeComfyUITask(taskId: string): Promise<void> {
         const filePath = join(taskOutputDir, filename)
         writeFileSync(filePath, buffer)
 
-        // Save to run_results table
         const resultId = randomUUID()
         db.prepare(`
           INSERT INTO run_results (id, task_id, batch_run_id, workspace_id, output_type, storage_driver, storage_key, file_name, mime_type, file_size, metadata, created_at)
@@ -145,7 +149,6 @@ export async function executeComfyUITask(taskId: string): Promise<void> {
     }
   }
 
-  // Mark task as succeeded
   updateTaskStatus(taskId, 'succeeded', {
     resultJson: { outputs: results, promptId: promptResponse.prompt_id }
   })
@@ -199,7 +202,6 @@ function applyParams(
     const inputs = node.inputs as Record<string, unknown>
     let value = mapping.runtimeInput ? inputParams[paramKey] : mapping.defaultValue
 
-    // Handle seed randomization
     if (value === -1 && mapping.inputName === 'seed') {
       value = Math.floor(Math.random() * 2 ** 32)
     }

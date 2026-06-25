@@ -10,6 +10,7 @@ export default defineNuxtConfig({
     }
   },
   modules: [
+    '@unocss/nuxt',
     '@element-plus/nuxt',
     '@pinia/nuxt',
     '@nuxtjs/i18n',
@@ -21,11 +22,14 @@ export default defineNuxtConfig({
     '~/assets/css/base.css',
     '~/assets/css/surfaces.css',
     '~/assets/css/forms.css',
-    '~/assets/css/primitives.css'
+    '~/assets/scss/primitives.scss'
   ],
   elementPlus: {
     importStyle: 'scss',
     defaultLocale: 'zh-cn'
+  },
+  unocss: {
+    components: false
   },
   vite: {
     css: {

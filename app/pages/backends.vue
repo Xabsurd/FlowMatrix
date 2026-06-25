@@ -49,14 +49,13 @@
 
     <ElEmpty v-if="!backends.length && !loading" description="暂无执行后端，点击「添加后端」开始配置。" />
 
-    <!-- Add Backend Dialog -->
     <ElDialog v-model="showAddDialog" title="添加执行后端" width="500px">
       <ElForm :model="form" label-width="100px">
         <ElFormItem label="名称" required>
           <ElInput v-model="form.name" placeholder="My ComfyUI Server" />
         </ElFormItem>
         <ElFormItem label="端点" required>
-          <ElInput v-model="form.endpoint" placeholder="http://127.0.0.1:8188" />
+          <ElInput v-model.trim="form.endpoint" placeholder="http://127.0.0.1:8188" />
         </ElFormItem>
         <ElFormItem label="类型">
           <ElSelect v-model="form.type" style="width: 100%">
@@ -120,17 +119,18 @@ async function fetchBackends() {
 }
 
 async function addBackend() {
-  if (!form.name || !form.endpoint) {
+  const endpoint = form.endpoint.trim()
+  if (!form.name || !endpoint) {
     ElMessage.warning('请填写名称和端点')
     return
   }
   saving.value = true
   try {
     await $fetch('/api/v1/backends', {
-      method: 'POST',
-      body: {
-        name: form.name,
-        endpoint: form.endpoint,
+        method: 'POST',
+        body: {
+          name: form.name,
+          endpoint,
         type: form.type,
         maxConcurrency: form.maxConcurrency,
         weight: form.weight,

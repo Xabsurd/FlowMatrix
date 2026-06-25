@@ -15,6 +15,7 @@ export default defineEventHandler(async (event) => {
     workflowId: body.workflowId,
     name: body.name,
     nodeParams: body.nodeParams,
+    outputNodes: body.outputNodes,
     backendId: body.backendId,
     backendGroupId: body.backendGroupId,
     description: body.description,

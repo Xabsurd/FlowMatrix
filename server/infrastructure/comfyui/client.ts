@@ -1,8 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import type { ModelSignature } from '../../../shared/types/app'
 
+export type ComfyUIQueueEntry = unknown[] | Record<string, unknown>
+
 export interface ComfyUIQueueInfo {
-  exec_info: { queue_running: number; queue_pending: number }
+  exec_info?: {
+    queue_running?: number
+    queue_pending?: number
+    queue_remaining?: number
+  }
+  queue_running?: ComfyUIQueueEntry[]
+  queue_pending?: ComfyUIQueueEntry[]
 }
 
 export interface ComfyUISystemInfo {
@@ -35,6 +43,59 @@ export interface ComfyUIOutput {
 
 const TIMEOUT_MS = 10_000
 
+const COMFY_ROUTE_SUFFIXES = [
+  '/system_stats',
+  '/object_info',
+  '/prompt',
+  '/view',
+  '/upload/image',
+  '/interrupt'
+]
+
+export function normalizeComfyEndpoint(input: string): string {
+  const trimmed = input.trim()
+  if (!trimmed) return ''
+
+  const withProtocol = /^[a-z][a-z\d+.-]*:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`
+  const url = new URL(withProtocol)
+  url.hash = ''
+  url.search = ''
+
+  let path = url.pathname.replace(/\/+$/, '')
+  for (const suffix of COMFY_ROUTE_SUFFIXES) {
+    if (path === suffix || path.endsWith(suffix)) {
+      path = path.slice(0, -suffix.length)
+      break
+    }
+  }
+  path = path.replace(/\/history\/.*$/, '').replace(/\/+$/, '')
+  url.pathname = path || '/'
+
+  return url.toString().replace(/\/$/, '')
+}
+
+function buildComfyUrl(endpoint: string, path: string, params?: URLSearchParams): string {
+  const base = normalizeComfyEndpoint(endpoint)
+  if (!base) throw new Error('ComfyUI endpoint is empty')
+
+  const baseUrl = new URL(base.endsWith('/') ? base : `${base}/`)
+  const url = new URL(path.replace(/^\/+/, ''), baseUrl)
+  if (params) url.search = params.toString()
+  return url.toString()
+}
+
+function formatFetchError(error: unknown): string {
+  if (error instanceof Error) {
+    const cause = error.cause
+    const causeMessage = cause instanceof Error ? cause.message : ''
+    if (error.name === 'TimeoutError' || causeMessage.includes('timed out')) return '连接超时，请确认 ComfyUI 已启动且端口可访问'
+    if (causeMessage.includes('ECONNREFUSED')) return '连接被拒绝，请确认端口正确且 ComfyUI 正在监听该地址'
+    if (causeMessage.includes('ENOTFOUND')) return '无法解析主机名，请检查端点地址'
+    return causeMessage || error.message
+  }
+  return String(error)
+}
+
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, { ...init, signal: AbortSignal.timeout(TIMEOUT_MS) })
   if (!res.ok) throw new Error(`ComfyUI ${res.status}: ${await res.text()}`)
@@ -43,23 +104,49 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 
 export async function testConnection(endpoint: string): Promise<{ ok: boolean; version?: string; error?: string }> {
   try {
-    const data = await fetchJson<{ version?: string }>(`${endpoint}/system_stats`)
+    const data = await fetchJson<{ version?: string }>(buildComfyUrl(endpoint, '/system_stats'))
     return { ok: true, version: data.version }
   } catch (error) {
-    return { ok: false, error: String(error) }
+    return { ok: false, error: formatFetchError(error) }
   }
 }
 
 export async function getQueueInfo(endpoint: string): Promise<ComfyUIQueueInfo> {
-  return fetchJson<ComfyUIQueueInfo>(`${endpoint}/prompt`)
+  return fetchJson<ComfyUIQueueInfo>(buildComfyUrl(endpoint, '/prompt'))
+}
+
+export function getQueueCounts(queue: ComfyUIQueueInfo): { running: number; pending: number } {
+  const running = Array.isArray(queue.queue_running)
+    ? queue.queue_running.length
+    : Number(queue.exec_info?.queue_running ?? 0)
+  const pending = Array.isArray(queue.queue_pending)
+    ? queue.queue_pending.length
+    : Number(queue.exec_info?.queue_pending ?? queue.exec_info?.queue_remaining ?? 0)
+  return { running, pending }
+}
+
+export function getPromptQueueState(queue: ComfyUIQueueInfo, promptId: string): 'running' | 'pending' | 'unknown' {
+  if (queue.queue_running?.some(entry => queueEntryHasPromptId(entry, promptId))) return 'running'
+  if (queue.queue_pending?.some(entry => queueEntryHasPromptId(entry, promptId))) return 'pending'
+  return 'unknown'
+}
+
+function queueEntryHasPromptId(entry: unknown, promptId: string): boolean {
+  if (typeof entry === 'string') return entry === promptId
+  if (Array.isArray(entry)) return entry.some(item => queueEntryHasPromptId(item, promptId))
+  if (typeof entry !== 'object' || entry === null) return false
+
+  const record = entry as Record<string, unknown>
+  if (record.prompt_id === promptId || record.promptId === promptId) return true
+  return Object.values(record).some(value => queueEntryHasPromptId(value, promptId))
 }
 
 export async function getSystemInfo(endpoint: string): Promise<ComfyUISystemInfo> {
-  return fetchJson<ComfyUISystemInfo>(`${endpoint}/system_stats`)
+  return fetchJson<ComfyUISystemInfo>(buildComfyUrl(endpoint, '/system_stats'))
 }
 
 export async function getObjectInfo(endpoint: string): Promise<Record<string, ComfyUINodeInfo>> {
-  return fetchJson<Record<string, ComfyUINodeInfo>>(`${endpoint}/object_info`)
+  return fetchJson<Record<string, ComfyUINodeInfo>>(buildComfyUrl(endpoint, '/object_info'))
 }
 
 export interface ComfyUINodeInfo {
@@ -76,8 +163,6 @@ export interface ComfyUINodeInfo {
   output_node: boolean
 }
 
-// Resource lists are fetched from ComfyUI /object_info; callers decide when to persist them.
-// Ceiling: no pagination needed for model lists; upgrade path: add caching if ComfyUI has thousands of models.
 export async function listModels(endpoint: string, type: string): Promise<string[]> {
   const info = await getObjectInfo(endpoint)
   const nodeName = MODEL_NODE_MAP[type]
@@ -120,7 +205,7 @@ export async function submitPrompt(
 ): Promise<ComfyUIPromptResponse> {
   const body: Record<string, unknown> = { prompt: workflow }
   if (clientId) body.client_id = clientId
-  return fetchJson<ComfyUIPromptResponse>(`${endpoint}/prompt`, {
+  return fetchJson<ComfyUIPromptResponse>(buildComfyUrl(endpoint, '/prompt'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body)
@@ -128,13 +213,13 @@ export async function submitPrompt(
 }
 
 export async function getHistory(endpoint: string, promptId: string): Promise<ComfyUIHistoryItem | null> {
-  const data = await fetchJson<Record<string, ComfyUIHistoryItem>>(`${endpoint}/history/${promptId}`)
+  const data = await fetchJson<Record<string, ComfyUIHistoryItem>>(buildComfyUrl(endpoint, `/history/${promptId}`))
   return data[promptId] ?? null
 }
 
 export async function getImage(endpoint: string, filename: string, subfolder: string, type: string): Promise<Buffer> {
   const params = new URLSearchParams({ filename, subfolder, type })
-  const res = await fetch(`${endpoint}/view?${params}`, { signal: AbortSignal.timeout(30_000) })
+  const res = await fetch(buildComfyUrl(endpoint, '/view', params), { signal: AbortSignal.timeout(30_000) })
   if (!res.ok) throw new Error(`ComfyUI image ${res.status}`)
   const ab = await res.arrayBuffer()
   return Buffer.from(ab)
@@ -150,7 +235,7 @@ export async function uploadImage(
   form.append('image', new Blob([Uint8Array.from(file)], { type: mimeType }), filename)
   form.append('overwrite', 'true')
 
-  const res = await fetch(`${endpoint}/upload/image`, {
+  const res = await fetch(buildComfyUrl(endpoint, '/upload/image'), {
     method: 'POST',
     body: form,
     signal: AbortSignal.timeout(30_000)
@@ -160,7 +245,7 @@ export async function uploadImage(
 }
 
 export async function interruptPrompt(endpoint: string): Promise<void> {
-  await fetch(`${endpoint}/interrupt`, { method: 'POST', signal: AbortSignal.timeout(TIMEOUT_MS) })
+  await fetch(buildComfyUrl(endpoint, '/interrupt'), { method: 'POST', signal: AbortSignal.timeout(TIMEOUT_MS) })
 }
 
 export function extractModelSignature(workflow: Record<string, unknown>): ModelSignature {
@@ -208,7 +293,7 @@ export function parseWorkflowNodes(rawJson: Record<string, unknown>): Array<{
     if (node.inputs) {
       for (const [key, value] of Object.entries(node.inputs)) {
         if (Array.isArray(value) && value.length === 2 && typeof value[1] === 'number') {
-          inputs[key] = { type: 'link', default: value }
+          inputs[key] = primitiveInputSpec(node.class_type, key, value)
         } else if (typeof value === 'string') {
           inputs[key] = { type: 'STRING', default: value }
         } else if (typeof value === 'number') {
@@ -229,4 +314,13 @@ export function parseWorkflowNodes(rawJson: Record<string, unknown>): Array<{
     })
   }
   return nodes
+}
+
+function primitiveInputSpec(nodeType: string, inputName: string, value: unknown[]) {
+  if (inputName !== 'value') return { type: 'link', default: value }
+  if (/PrimitiveString/i.test(nodeType)) return { type: 'STRING', default: '' }
+  if (/Primitive(Boolean|Bool)/i.test(nodeType)) return { type: 'BOOLEAN', default: false }
+  if (/Primitive(Float|Number)/i.test(nodeType)) return { type: 'FLOAT', default: 0 }
+  if (/Primitive(Int|Integer)/i.test(nodeType)) return { type: 'INT', default: 0 }
+  return { type: 'link', default: value }
 }

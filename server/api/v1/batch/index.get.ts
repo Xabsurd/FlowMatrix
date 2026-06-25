@@ -4,7 +4,8 @@ import { getRequestContext } from '../../../domain/context'
 
 export default defineEventHandler((event) => {
   const ctx = getRequestContext(event)
-  const limit = Number(getQuery(event).limit) || 50
-  const offset = Number(getQuery(event).offset) || 0
+  const query = getQuery(event)
+  const limit = Math.min(Math.max(Number(query.limit) || 50, 1), 100)
+  const offset = Math.max(Number(query.offset) || 0, 0)
   return listBatchRuns(ctx.workspaceId, limit, offset)
 })

@@ -12,7 +12,6 @@ export default defineEventHandler((event) => {
     throw createError({ statusCode: 400, message: 'Only local files can be served directly' })
   }
 
-  // Resolve the path and ensure it's inside output directory
   const rootDir = resolve(process.cwd(), './data/outputs')
   const filePath = resolve(process.cwd(), result.storageKey)
   

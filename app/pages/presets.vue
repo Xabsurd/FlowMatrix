@@ -18,8 +18,8 @@
           </div>
           <div class="fm-card-actions">
             <ElTag size="small">{{ preset.scheduleMode }}</ElTag>
-            <ElButton text @click="openEditDialog(preset)">编辑</ElButton>
-            <ElButton text type="danger" @click="removePreset(preset)">删除</ElButton>
+            <ElButton text :size="rowActionSize" @click="openEditDialog(preset)">编辑</ElButton>
+            <ElButton text :size="rowActionSize" type="danger" @click="removePreset(preset)">删除</ElButton>
           </div>
         </div>
         <div class="fm-card-body">
@@ -30,6 +30,10 @@
           <div class="fm-meta-row">
             <span class="fm-label">固定参数</span>
             <span class="fm-value">{{ preset.nodeParams.filter(param => !param.runtimeInput).length }}</span>
+          </div>
+          <div class="fm-meta-row">
+            <span class="fm-label">输出节点</span>
+            <span class="fm-value">{{ enabledOutputCount(preset) }}</span>
           </div>
           <div class="fm-node-list">
             <ElTag
@@ -122,10 +126,31 @@
                 placeholder="固定值"
                 class="fm-fixed-input"
               />
-              <ElButton text type="danger" @click="configuredParams.splice(index, 1)">移除</ElButton>
+              <ElButton text :size="rowActionSize" type="danger" @click="configuredParams.splice(index, 1)">移除</ElButton>
             </div>
           </div>
           <ElEmpty v-else description="请从上方选择节点和参数后添加。" />
+        </div>
+
+        <div class="fm-output-builder">
+          <div class="fm-section-heading">
+            <strong>输出节点</strong>
+            <span>只保存勾选节点产生的结果文件</span>
+          </div>
+          <div v-if="outputNodeOptions.length" class="fm-output-list">
+            <label
+              v-for="node in outputNodeOptions"
+              :key="node.nodeId"
+              class="fm-output-row"
+            >
+              <ElCheckbox v-model="outputNodeDraft[node.nodeId]" />
+              <div>
+                <strong>{{ node.nodeType }}</strong>
+                <small>{{ node.nodeId }}{{ node.title ? ` · ${node.title}` : '' }}</small>
+              </div>
+            </label>
+          </div>
+          <ElEmpty v-else description="未识别到常见输出节点，运行时将保留所有输出。" />
         </div>
       </ElForm>
       <template #footer>
@@ -139,6 +164,8 @@
 <script setup lang="ts">
 import { ElMessage, ElMessageBox } from 'element-plus'
 
+const { rowActionSize } = useUiPreferences()
+
 interface ParsedNodeInput {
   type: string
   options?: unknown[]
@@ -150,6 +177,13 @@ interface ParsedNode {
   nodeType: string
   title?: string
   inputs: Record<string, ParsedNodeInput>
+}
+
+interface OutputNode {
+  nodeId: string
+  nodeType: string
+  title?: string
+  enabled: boolean
 }
 
 interface Workflow {
@@ -182,11 +216,13 @@ interface Preset {
   description: string | null
   scheduleMode: string
   nodeParams: NodeParam[]
+  outputNodes?: OutputNode[]
 }
 
 const workflows = ref<Workflow[]>([])
 const presets = ref<Preset[]>([])
 const configuredParams = ref<ConfiguredParam[]>([])
+const outputNodeDraft = reactive<Record<string, boolean>>({})
 const loading = ref(false)
 const saving = ref(false)
 const showCreateDialog = ref(false)
@@ -208,12 +244,21 @@ const selectedWorkflow = computed(() => workflows.value.find(workflow => workflo
 const selectableNodes = computed(() => selectedWorkflow.value?.parsedNodes || [])
 const selectedNode = computed(() => selectableNodes.value.find(node => node.nodeId === draft.nodeKey))
 const selectableInputs = computed(() => Object.entries(selectedNode.value?.inputs || {})
-  .filter(([, spec]) => spec.type !== 'link')
+  .filter(([name, spec]) => spec.type !== 'link' || isPrimitiveValueInput(selectedNode.value, name))
   .map(([name, spec]) => ({ name, spec })))
+const outputNodeOptions = computed(() => (selectedWorkflow.value?.parsedNodes || [])
+  .filter(node => isOutputNode(node))
+  .map(node => ({
+    nodeId: node.nodeId,
+    nodeType: node.nodeType,
+    title: node.title,
+    enabled: outputNodeDraft[node.nodeId] ?? true
+  })))
 
 watch(() => form.workflowId, () => {
   if (hydratingForm.value) return
   configuredParams.value = []
+  syncOutputNodeDraft()
   draft.nodeKey = ''
   draft.inputName = ''
 })
@@ -247,6 +292,7 @@ function openCreateDialog() {
   form.scheduleMode = 'idle-first'
   form.description = ''
   configuredParams.value = []
+  syncOutputNodeDraft()
   draft.nodeKey = ''
   draft.inputName = ''
   draft.runtimeInput = true
@@ -266,6 +312,7 @@ function openEditDialog(preset: Preset) {
     runtimeInput: Boolean(param.runtimeInput),
     defaultText: valueToText(param.defaultValue)
   }))
+  syncOutputNodeDraft(preset.outputNodes)
   draft.nodeKey = ''
   draft.inputName = ''
   draft.runtimeInput = true
@@ -307,6 +354,12 @@ async function savePreset() {
     ...param,
     defaultValue: parseValue(defaultText, param.inferredType)
   }))
+  const outputNodes = outputNodeOptions.value.map(node => ({
+    nodeId: node.nodeId,
+    nodeType: node.nodeType,
+    title: node.title,
+    enabled: Boolean(outputNodeDraft[node.nodeId])
+  }))
 
   if (!form.name.trim() || !form.workflowId) {
     ElMessage.warning('请填写名称并选择工作流')
@@ -323,7 +376,8 @@ async function savePreset() {
       name: form.name.trim(),
       description: form.description.trim(),
       scheduleMode: form.scheduleMode,
-      nodeParams
+      nodeParams,
+      outputNodes
     }
     await $fetch(editingId.value ? `/api/v1/presets/${editingId.value}` : '/api/v1/presets', {
       method: editingId.value ? 'PATCH' : 'POST',
@@ -342,6 +396,26 @@ async function savePreset() {
   }
 }
 
+function enabledOutputCount(preset: Preset) {
+  if (!preset.outputNodes?.length) return '全部'
+  return preset.outputNodes.filter(node => node.enabled).length
+}
+
+function syncOutputNodeDraft(nodes?: OutputNode[]) {
+  for (const key of Object.keys(outputNodeDraft)) {
+    Reflect.deleteProperty(outputNodeDraft, key)
+  }
+
+  const saved = new Map((nodes || []).map(node => [node.nodeId, node.enabled]))
+  for (const node of outputNodeOptions.value) {
+    outputNodeDraft[node.nodeId] = saved.get(node.nodeId) ?? true
+  }
+}
+
+function isOutputNode(node: ParsedNode) {
+  return /save|preview|output/i.test(node.nodeType)
+}
+
 async function removePreset(preset: Preset) {
   try {
     await ElMessageBox.confirm(`确定删除「${preset.name}」？已创建的历史运行记录不会被删除。`, '删除调用配置', { type: 'warning' })
@@ -357,6 +431,7 @@ async function removePreset(preset: Preset) {
 function inferParam(nodeType: string, inputName: string, input: ParsedNodeInput) {
   const known = knownParams[`${nodeType}.${inputName}`]
   if (known) return known
+  if (isPrimitiveValueInput({ nodeType } as ParsedNode, inputName)) return inferPrimitiveParam(nodeType)
   if (input.type === 'INT') return { inferredType: 'INT', controlType: 'number' }
   if (input.type === 'FLOAT') return { inferredType: 'FLOAT', controlType: 'number' }
   if (input.type === 'BOOLEAN') return { inferredType: 'BOOLEAN', controlType: 'switch' }
@@ -365,6 +440,17 @@ function inferParam(nodeType: string, inputName: string, input: ParsedNodeInput)
   if (isImageInput(inputName)) return { inferredType: 'IMAGE', controlType: 'file-upload' }
   if (isFileInput(inputName)) return { inferredType: 'FILE', controlType: 'file-upload' }
   return { inferredType: 'STRING', controlType: inputName.toLowerCase().includes('text') ? 'textarea' : 'text' }
+}
+
+function isPrimitiveValueInput(node: ParsedNode | undefined, inputName: string) {
+  return inputName === 'value' && Boolean(node?.nodeType.match(/^Primitive/i))
+}
+
+function inferPrimitiveParam(nodeType: string) {
+  if (/Primitive(Boolean|Bool)/i.test(nodeType)) return { inferredType: 'BOOLEAN', controlType: 'switch' }
+  if (/Primitive(Float|Number)/i.test(nodeType)) return { inferredType: 'FLOAT', controlType: 'number' }
+  if (/Primitive(Int|Integer)/i.test(nodeType)) return { inferredType: 'INT', controlType: 'number' }
+  return { inferredType: 'STRING', controlType: 'textarea' }
 }
 
 function isImageInput(inputName: string) {
@@ -420,6 +506,9 @@ onMounted(fetchData)
 .fm-node-list { display: flex; flex-wrap: wrap; gap: 6px; }
 .fm-form-grid { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 12px; }
 .fm-builder { display: flex; flex-direction: column; gap: 12px; }
+.fm-section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.fm-section-heading strong { color: var(--fm-text); font-size: 14px; }
+.fm-section-heading span { color: var(--fm-muted); font-size: 12px; }
 .fm-builder-toolbar { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto auto; align-items: center; gap: 10px; }
 .fm-param-list { display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow: auto; }
 .fm-param-row { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(180px, 240px) auto; align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--fm-border); border-radius: var(--fm-radius); background: color-mix(in srgb, var(--fm-panel-muted) 72%, transparent); }
@@ -427,6 +516,12 @@ onMounted(fetchData)
 .fm-param-main strong { color: var(--fm-text); font-size: 13px; }
 .fm-param-main small { color: var(--fm-muted); overflow-wrap: anywhere; }
 .fm-fixed-input { min-width: 0; }
+.fm-output-builder { display: grid; gap: 12px; margin-top: 16px; }
+.fm-output-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
+.fm-output-row { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--fm-border); border-radius: var(--fm-radius); background: color-mix(in srgb, var(--fm-panel-muted) 72%, transparent); cursor: pointer; }
+.fm-output-row div { display: grid; gap: 3px; min-width: 0; }
+.fm-output-row strong { overflow: hidden; color: var(--fm-text); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.fm-output-row small { color: var(--fm-muted); overflow-wrap: anywhere; }
 @media (max-width: 860px) {
   .fm-form-grid,
   .fm-builder-toolbar,

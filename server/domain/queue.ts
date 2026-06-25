@@ -23,14 +23,21 @@ export function enqueue(taskId: string, priority = 0): QueueJob {
   db.prepare(`
     INSERT INTO task_queue (id, task_id, priority, status, attempts, max_attempts, created_at, updated_at)
     VALUES (?, ?, ?, 'pending', 0, 3, ?, ?)
+    ON CONFLICT(task_id) DO UPDATE SET
+      priority = excluded.priority,
+      status = 'pending',
+      claimed_by = NULL,
+      claimed_at = NULL,
+      attempts = 0,
+      error = NULL,
+      updated_at = excluded.updated_at
   `).run(id, taskId, priority, now, now)
-  return getJob(id)!
+  return getJob(id) ?? getJobByTask(taskId)!
 }
 
 export function claimNext(workerId: string): QueueJob | null {
   const db = getSqlite()
   const now = Date.now()
-  // SQLite WAL serialization is enough for the local queue; Redis claiming is the multi-worker upgrade path.
   const row = db.prepare(`
     SELECT id FROM task_queue
     WHERE status = 'pending'
@@ -49,6 +56,31 @@ export function claimNext(workerId: string): QueueJob | null {
   if (!claimed) return null
 
   return rowToJob(claimed)
+}
+
+export function claimPendingBatchJobs(batchRunId: string, workerId: string): QueueJob[] {
+  const db = getSqlite()
+  const now = Date.now()
+  const rows = db.prepare(`
+    SELECT q.id
+    FROM task_queue q
+    INNER JOIN run_tasks t ON t.id = q.task_id
+    WHERE t.batch_run_id = ? AND q.status = 'pending'
+    ORDER BY q.priority DESC, q.created_at ASC
+  `).all(batchRunId) as Array<{ id: string }>
+
+  if (!rows.length) return []
+
+  const claim = db.prepare(`
+    UPDATE task_queue SET status = 'claimed', claimed_by = ?, claimed_at = ?, updated_at = ?
+    WHERE id = ? AND status = 'pending'
+  `)
+  for (const row of rows) claim.run(workerId, now, now, row.id)
+
+  const ids = rows.map(() => '?').join(',')
+  const claimedRows = db.prepare(`SELECT * FROM task_queue WHERE id IN (${ids}) AND claimed_by = ?`)
+    .all(...rows.map(row => row.id), workerId) as Record<string, unknown>[]
+  return claimedRows.map(rowToJob)
 }
 
 export function markProcessing(jobId: string): void {
@@ -79,7 +111,7 @@ export function releaseStale(maxAgeMs = 60_000): number {
   const cutoff = Date.now() - maxAgeMs
   const result = db.prepare(`
     UPDATE task_queue SET status = 'pending', claimed_by = NULL, claimed_at = NULL, updated_at = ?
-    WHERE status IN ('claimed', 'processing') AND claimed_at < ?
+    WHERE status = 'claimed' AND claimed_at < ?
   `).run(Date.now(), cutoff)
   return result.changes
 }

@@ -95,11 +95,12 @@ export function createBackend(input: {
   const db = getSqlite()
   const id = randomUUID()
   const now = Date.now()
+  const endpoint = input.type === 'comfyui' ? comfyui.normalizeComfyEndpoint(input.endpoint) : input.endpoint.trim()
   db.prepare(`
     INSERT INTO backends (id, group_id, workspace_id, type, name, endpoint, enabled, paused, weight, max_concurrency, tags, capabilities, health_status, failure_count, current_load, queue_length, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, 'unknown', 0, 0, 0, ?, ?)
   `).run(
-    id, input.groupId ?? null, input.workspaceId, input.type, input.name, input.endpoint,
+    id, input.groupId ?? null, input.workspaceId, input.type, input.name, endpoint,
     input.weight ?? 1, input.maxConcurrency ?? 2,
     JSON.stringify(input.tags ?? []), JSON.stringify(input.capabilities ?? []),
     now, now
@@ -137,7 +138,10 @@ export function updateBackend(id: string, patch: Partial<{
   const vals: unknown[] = []
 
   if (patch.name !== undefined) { sets.push('name = ?'); vals.push(patch.name) }
-  if (patch.endpoint !== undefined) { sets.push('endpoint = ?'); vals.push(patch.endpoint) }
+  if (patch.endpoint !== undefined) {
+    sets.push('endpoint = ?')
+    vals.push(existing.type === 'comfyui' ? comfyui.normalizeComfyEndpoint(patch.endpoint) : patch.endpoint.trim())
+  }
   if (patch.enabled !== undefined) { sets.push('enabled = ?'); vals.push(patch.enabled ? 1 : 0) }
   if (patch.paused !== undefined) { sets.push('paused = ?'); vals.push(patch.paused ? 1 : 0) }
   if (patch.weight !== undefined) { sets.push('weight = ?'); vals.push(patch.weight) }
@@ -356,7 +360,6 @@ export function selectBackend(input: ScheduleInput, workspaceId: string): Backen
     let score = 0
 
     if (!b.enabled || b.paused) { rejected.push({ backendId: b.id, reason: 'disabled or paused' }); continue }
-    if (b.healthStatus === 'unhealthy') { rejected.push({ backendId: b.id, reason: 'unhealthy' }); continue }
     if (b.currentLoad >= b.maxConcurrency) { rejected.push({ backendId: b.id, reason: 'at max concurrency' }); continue }
 
     // Resource check
@@ -367,13 +370,17 @@ export function selectBackend(input: ScheduleInput, workspaceId: string): Backen
         if (!resourceMap.has(r.type)) resourceMap.set(r.type, new Set())
         resourceMap.get(r.type)!.add(r.name)
       }
-      const missing = input.requiredResources.filter(r => !resourceMap.get(r.type)?.has(r.name))
-      if (missing.length > 0) {
-        rejected.push({ backendId: b.id, reason: `missing: ${missing.map(m => m.name).join(', ')}` })
-        continue
+      if (resourceMap.size > 0) {
+        const missing = input.requiredResources.filter(r => !resourceMap.get(r.type)?.has(r.name))
+        if (missing.length > 0) {
+          rejected.push({ backendId: b.id, reason: `missing: ${missing.map(m => m.name).join(', ')}` })
+          continue
+        }
+        reasons.push('resources OK')
+        score += 10
+      } else {
+        reasons.push('resource index empty')
       }
-      reasons.push('resources OK')
-      score += 10
     }
 
     // Model affinity
@@ -406,6 +413,10 @@ export function selectBackend(input: ScheduleInput, workspaceId: string): Backen
 
     score += b.weight * 2
     if (b.healthStatus === 'healthy') score += 5
+    if (b.healthStatus === 'unhealthy') {
+      score -= 5
+      reasons.push('health previously failed')
+    }
     reasons.push(`weight: ${b.weight}`)
     candidates.push({ backend: b, score, reasons })
   }

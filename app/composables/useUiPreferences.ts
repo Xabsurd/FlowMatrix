@@ -12,6 +12,7 @@ function isComponentSize(value: string | null): value is ComponentSize {
 
 export function useUiPreferences() {
   const componentSize = useState<ComponentSize>('flowmatrix-component-size', () => DEFAULT_COMPONENT_SIZE)
+  const rowActionSize = computed(() => componentSize.value === 'small' ? 'small' : 'default')
 
   function setComponentSize(value: string | number) {
     const nextSize = isComponentSize(String(value)) ? String(value) as ComponentSize : DEFAULT_COMPONENT_SIZE
@@ -30,6 +31,7 @@ export function useUiPreferences() {
   return {
     componentSize,
     componentSizes,
+    rowActionSize,
     hydrateUiPreferences,
     setComponentSize
   }
