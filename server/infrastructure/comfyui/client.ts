@@ -41,7 +41,6 @@ export interface ComfyUIOutput {
   [key: string]: unknown
 }
 
-const TIMEOUT_MS = 10_000
 
 const COMFY_ROUTE_SUFFIXES = [
   '/system_stats',
@@ -97,7 +96,7 @@ function formatFetchError(error: unknown): string {
 }
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, { ...init, signal: AbortSignal.timeout(TIMEOUT_MS) })
+  const res = await fetch(url, { ...init })
   if (!res.ok) throw new Error(`ComfyUI ${res.status}: ${await res.text()}`)
   return res.json() as Promise<T>
 }
@@ -219,7 +218,7 @@ export async function getHistory(endpoint: string, promptId: string): Promise<Co
 
 export async function getImage(endpoint: string, filename: string, subfolder: string, type: string): Promise<Buffer> {
   const params = new URLSearchParams({ filename, subfolder, type })
-  const res = await fetch(buildComfyUrl(endpoint, '/view', params), { signal: AbortSignal.timeout(30_000) })
+  const res = await fetch(buildComfyUrl(endpoint, '/view', params))
   if (!res.ok) throw new Error(`ComfyUI image ${res.status}`)
   const ab = await res.arrayBuffer()
   return Buffer.from(ab)
@@ -237,15 +236,14 @@ export async function uploadImage(
 
   const res = await fetch(buildComfyUrl(endpoint, '/upload/image'), {
     method: 'POST',
-    body: form,
-    signal: AbortSignal.timeout(30_000)
+    body: form
   })
   if (!res.ok) throw new Error(`ComfyUI upload ${res.status}: ${await res.text()}`)
   return res.json() as Promise<{ name: string; subfolder: string; type: string }>
 }
 
 export async function interruptPrompt(endpoint: string): Promise<void> {
-  await fetch(buildComfyUrl(endpoint, '/interrupt'), { method: 'POST', signal: AbortSignal.timeout(TIMEOUT_MS) })
+  await fetch(buildComfyUrl(endpoint, '/interrupt'), { method: 'POST' })
 }
 
 export function extractModelSignature(workflow: Record<string, unknown>): ModelSignature {

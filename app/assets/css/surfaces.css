@@ -73,6 +73,25 @@
   border-radius: var(--fm-radius);
 }
 
+.el-popper.is-dark,
+.el-popper.is-light {
+  --el-popper-bg-color-dark: color-mix(in srgb, var(--fm-popper-bg) 82%, transparent);
+  --el-popper-bg-color-light: color-mix(in srgb, var(--fm-popper-bg) 82%, transparent);
+  border: none !important;
+  color: var(--fm-text) !important;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--fm-glass-edge) 7%, transparent), transparent 42%),
+    color-mix(in srgb, var(--fm-popper-bg) 82%, transparent) !important;
+  backdrop-filter: blur(var(--fm-blur)) saturate(1.12) !important;
+  -webkit-backdrop-filter: blur(var(--fm-blur)) saturate(1.12) !important;
+}
+
+.el-popper.is-dark > .el-popper__arrow::before,
+.el-popper.is-light > .el-popper__arrow::before {
+  border: none !important;
+  background: color-mix(in srgb, var(--fm-popper-bg) 82%, transparent);
+}
+
 .el-card,
 .el-table,
 .el-tabs--border-card,

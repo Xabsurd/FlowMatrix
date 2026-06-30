@@ -6,7 +6,7 @@
         <h1 class="fm-page-title">运行</h1>
         <p class="fm-page-subtitle">文件会先在浏览器暂存；替换和删除只影响待运行队列，点击运行时才提交有效文件。</p>
       </div>
-      <ElButton type="primary" :loading="submitting" @click="startRun">开始运行</ElButton>
+      <ElButton class="fm-run-submit-desktop" type="primary" :loading="submitting" @click="startRun">开始运行</ElButton>
     </div>
 
     <div class="fm-run-grid">
@@ -70,6 +70,9 @@
         @estimate-change="estimatedTaskCount = $event" />
     </div>
 
+    <div class="fm-run-submit-bar">
+      <ElButton type="primary" :loading="submitting" @click="startRun">开始运行</ElButton>
+    </div>
   </section>
 </template>
 
@@ -149,6 +152,8 @@ async function fetchPresets() {
     : presets.value[0]?.id || ''
 
   if (copied) {
+    // Wait for the runtime inputs component to receive updated params after presetId changes
+    await nextTick()
     await nextTick()
     const result = runtimeInputRef.value?.applyCopiedParams(copied.inputParams)
     if (result) {
@@ -231,17 +236,25 @@ onMounted(() => {
   display: grid;
   gap: 16px;
   align-items: start;
+  min-width: 0;
 }
 
 .fm-config-panel {
   display: grid;
   gap: 14px;
+  min-width: 0;
 }
 
 .fm-page-header {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
+  gap: 14px;
+  min-width: 0;
+}
+
+.fm-run-submit-bar {
+  display: none;
 }
 
 .fm-panel-heading {
@@ -271,7 +284,7 @@ onMounted(() => {
 
 .fm-config-form {
   display: grid;
-  grid-template-columns: minmax(240px, 1.1fr) minmax(220px, 1fr) minmax(220px, 1fr) max-content;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   align-items: end;
   min-width: 0;
@@ -283,14 +296,14 @@ onMounted(() => {
 
 .fm-config-meta {
   display: grid;
-  gap: 8px;
+  gap: 12px;
   min-width: 0;
 }
 
 .fm-preset-summary {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+  gap: 12px;
 }
 
 .fm-preset-summary div {
@@ -330,7 +343,7 @@ onMounted(() => {
   line-height: 1.55;
 }
 
-@media (max-width: 1180px) {
+@media (max-width: 760px) {
   .fm-config-form {
     grid-template-columns: 1fr;
   }
@@ -339,6 +352,54 @@ onMounted(() => {
 @media (max-width: 900px) {
   .fm-page-header,
   .fm-config-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .fm-page-header {
+    gap: 14px;
+  }
+
+  .fm-run-submit-desktop {
+    display: none;
+  }
+
+  .fm-run-submit-bar {
+    position: fixed;
+    right: 10px;
+    bottom: 78px;
+    left: 10px;
+    z-index: 19;
+    display: block;
+    padding: 8px;
+    border: 1px solid color-mix(in srgb, var(--fm-border) 78%, var(--fm-glass-edge));
+    border-radius: var(--fm-radius);
+    background:
+      linear-gradient(180deg, color-mix(in srgb, var(--fm-glass-edge) 10%, transparent), transparent 38%),
+      color-mix(in srgb, var(--fm-panel) 92%, transparent);
+    box-shadow: var(--fm-shadow);
+    backdrop-filter: blur(var(--fm-blur)) saturate(1.12);
+    -webkit-backdrop-filter: blur(var(--fm-blur)) saturate(1.12);
+  }
+
+  .fm-run-submit-bar .el-button {
+    width: 100%;
+  }
+}
+
+@media (max-width: 640px) {
+  .fm-config-panel {
+    gap: 12px;
+  }
+
+  .fm-page-subtitle {
+    overflow-wrap: anywhere;
+  }
+
+  .fm-panel-heading {
+    align-items: flex-start;
+  }
+
+  .fm-preset-summary {
     grid-template-columns: 1fr;
   }
 }

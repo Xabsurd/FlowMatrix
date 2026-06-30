@@ -229,7 +229,7 @@ export function cancelBatchRun(id: string): boolean {
 
 export function getBatchRunTasks(batchRunId: string): RunTaskRow[] {
   const db = getSqlite()
-  const rows = db.prepare('SELECT * FROM run_tasks WHERE batch_run_id = ? ORDER BY created_at ASC').all(batchRunId) as Record<string, unknown>[]
+  const rows = db.prepare('SELECT * FROM run_tasks WHERE batch_run_id = ? ORDER BY json_extract(input_params, \'$._taskIndex\') ASC, created_at ASC, rowid ASC').all(batchRunId) as Record<string, unknown>[]
   return rows.map(rowToTask)
 }
 

@@ -2,11 +2,8 @@
 <script setup lang="ts">
 import { ElMessage, ElMessageBox } from 'element-plus'
 
-const COPIED_TASK_STORAGE_KEY = 'flowmatrix.copied-task'
-
 const route = useRoute()
 const router = useRouter()
-const { rowActionSize } = useUiPreferences()
 
 interface Task {
   id: string
@@ -212,17 +209,6 @@ function backToRun() {
   void router.push(detail.value?.id ? `/gallery?batchRunId=${detail.value.id}` : '/gallery')
 }
 
-function copyTaskToRun(task: Task) {
-  if (!import.meta.client) return
-  const inputParams = Object.fromEntries(visibleInputParams(task.inputParams))
-  sessionStorage.setItem(COPIED_TASK_STORAGE_KEY, JSON.stringify({
-    presetId: task.presetId,
-    inputParams
-  }))
-  ElMessage.success('已复制任务参数，正在返回运行页')
-  void router.push(`/runs?presetId=${task.presetId}`)
-}
-
 function formatDuration(row: unknown) {
   const task = row as Pick<Task, 'startedAt' | 'finishedAt'>
   if (!task.startedAt) return '-'
@@ -379,11 +365,10 @@ onBeforeUnmount(() => {
             <FmIcon :name="isTaskExpanded(task.id) ? 'chevronUp' : 'chevronDown'" />
           </button>
 
-          <div v-if="isTaskExpanded(task.id)" class="queue-task-detail">
+           <div v-if="isTaskExpanded(task.id)" class="queue-task-detail">
             <section>
               <div class="detail-section-head">
                 <h4>运行参数</h4>
-                <ElButton :size="rowActionSize" @click="copyTaskToRun(task)">复制任务</ElButton>
               </div>
               <div class="params-column">
                 <div v-for="[k, v] in visibleInputParams(task.inputParams)" :key="k" class="param-badge">

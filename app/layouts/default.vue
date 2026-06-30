@@ -96,9 +96,12 @@ onMounted(() => {
 .shell {
   display: grid;
   grid-template-columns: 272px minmax(0, 1fr);
+  width: 100%;
+  max-width: 100vw;
   min-height: 100vh;
   gap: 18px;
   padding: 18px;
+  overflow-x: clip;
   transition:
     grid-template-columns 180ms cubic-bezier(0.2, 0, 0.2, 1),
     gap 180ms ease,
@@ -253,6 +256,8 @@ onMounted(() => {
 
 .main {
   position: relative;
+  width: 100%;
+  max-width: 100%;
   min-width: 0;
   padding: 10px 4px 36px;
 }
@@ -381,12 +386,16 @@ onMounted(() => {
 
 @media (max-width: 920px) {
   .shell {
+    display: block;
     grid-template-columns: 1fr;
-    padding: 10px 10px 78px;
+    width: 100%;
+    max-width: 100vw;
+    padding: 10px 10px 142px;
+    overflow-x: hidden;
   }
 
   .sidebar {
-    display: none;
+    display: none !important;
   }
 
   .bottom-nav {
@@ -404,7 +413,10 @@ onMounted(() => {
   }
 
   .main {
-    padding-bottom: 16px;
+    width: 100%;
+    max-width: 100%;
+    padding-bottom: 24px;
+    overflow-x: clip;
   }
 }
 </style>

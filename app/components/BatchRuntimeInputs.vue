@@ -16,74 +16,43 @@
           <ElTag size="small" effect="plain">{{ param.controlType }}</ElTag>
         </div>
 
-        <div class="fm-runtime-values">
-          <template v-if="candidateCount(param)">
-            <ElTag v-for="candidate in candidatePreview(param)" :key="candidate.id" size="small" effect="plain">
-              {{ candidateLabel(candidate, param) }}
-            </ElTag>
-            <span v-if="candidateCount(param) > 4" class="fm-more-count">+{{ candidateCount(param) - 4 }}</span>
+        <div class="fm-runtime-editor">
+          <template v-if="isFileParam(param)">
+            <div
+              class="fm-upload-panel fm-upload-panel--inline"
+              :class="{ filled: activeFiles(paramKey(param)).length }"
+              role="button"
+              tabindex="0"
+              @click="openFilePicker(param)"
+              @keydown.enter.prevent="openFilePicker(param)"
+              @keydown.space.prevent="openFilePicker(param)"
+              @dragover.prevent
+              @drop.prevent="handleFileDrop($event, param)">
+              <div class="fm-upload-mark">{{ fileKindMark(param) }}</div>
+              <div class="fm-upload-main">
+                <strong>{{ uploadTitle(param) }}</strong>
+                <span>{{ uploadHint(param) }}</span>
+              </div>
+              <div class="fm-upload-count">
+                <strong>{{ activeFiles(paramKey(param)).length }}</strong>
+                <span>有效</span>
+              </div>
+            </div>
           </template>
-          <span v-else class="fm-runtime-empty">未添加候选值</span>
-        </div>
 
-        <div class="fm-runtime-actions">
-          <ElButton :size="rowActionSize" type="primary" @click="openEditor(param)">编辑</ElButton>
-          <ElButton :size="rowActionSize" @click="clearParamValues(param)">清空</ElButton>
-        </div>
-      </article>
-    </div>
-    <ElEmpty v-else description="该配置没有运行时输入，开始运行会按固定参数创建 1 个任务。" />
-
-    <ElDialog
-      v-model="editorVisible"
-      :title="editingParam ? `编辑 ${readableParamName(editingParam)}` : '编辑运行输入'"
-      width="720px"
-      append-to-body>
-      <div v-if="editingParam" class="fm-value-editor">
-        <div class="fm-editor-head">
-          <div>
-            <strong>{{ editingParam.nodeType }}.{{ editingParam.inputName }}</strong>
-            <span>{{ editorHelp(editingParam) }}</span>
-          </div>
-          <ElTag effect="plain">{{ editingParam.inferredType }}</ElTag>
-        </div>
-
-        <template v-if="isFileParam(editingParam)">
-          <div
-            class="fm-upload-panel"
-            :class="{ filled: activeFiles(editingKey).length }"
-            role="button"
-            tabindex="0"
-            @click="openFilePicker(editingParam)"
-            @keydown.enter.prevent="openFilePicker(editingParam)"
-            @keydown.space.prevent="openFilePicker(editingParam)"
-            @dragover.prevent
-            @drop.prevent="handleFileDrop($event, editingParam)">
-            <div class="fm-upload-mark">{{ fileKindMark(editingParam) }}</div>
-            <div class="fm-upload-main">
-              <strong>{{ uploadTitle(editingParam) }}</strong>
-              <span>{{ uploadHint(editingParam) }}</span>
-            </div>
-            <div class="fm-upload-count">
-              <strong>{{ activeFiles(editingKey).length }}</strong>
-              <span>有效</span>
-            </div>
-          </div>
-        </template>
-
-        <template v-else-if="isModelParam(editingParam)">
-          <div class="fm-editor-adder">
+          <template v-else-if="isModelParam(param)">
             <ElSelect
-              v-model="modelDraft"
+              :model-value="modelValues(param)"
               multiple
               filterable
               collapse-tags
               collapse-tags-tooltip
               :loading="resourceLoading"
               placeholder="选择一个或多个资源"
-              style="width: 100%">
+              style="width: 100%"
+              @update:model-value="setModelValues(param, $event)">
               <ElOption
-                v-for="resource in resourceOptionsFor(editingParam)"
+                v-for="resource in resourceOptionsFor(param)"
                 :key="`${resource.backendId}-${resource.name}`"
                 :label="resource.name"
                 :value="resource.name">
@@ -91,40 +60,74 @@
                 <small class="fm-option-meta">{{ resource.type }}</small>
               </ElOption>
             </ElSelect>
-            <ElButton type="primary" @click="addModelDraft">添加</ElButton>
-          </div>
-        </template>
+          </template>
 
-        <template v-else>
-          <div class="fm-editor-adder">
+          <template v-else>
             <ElInput
-              v-model="textDraft"
-              :type="editingParam.controlType === 'textarea' ? 'textarea' : 'text'"
-              :rows="editingParam.controlType === 'textarea' ? 5 : undefined"
-              :placeholder="singleValuePlaceholder(editingParam)"
-              @keydown.enter.exact.prevent="addTextDraft" />
-            <ElButton type="primary" @click="addTextDraft">添加</ElButton>
-          </div>
-        </template>
+              v-model="textDrafts[paramKey(param)]"
+              :type="param.controlType === 'textarea' ? 'textarea' : 'text'"
+              :rows="param.controlType === 'textarea' ? 3 : undefined"
+              :placeholder="singleValuePlaceholder(param)"
+              @keydown.enter.exact.prevent="addTextDraft(param)" />
+          </template>
 
-        <div class="fm-candidate-list">
-          <div class="fm-candidate-head">
-            <strong>候选值</strong>
-            <span>{{ candidateCount(editingParam) }} 个</span>
+          <div class="fm-runtime-values">
+            <template v-if="candidateCount(param)">
+              <template v-for="candidate in candidatesFor(param)" :key="candidate.id">
+                <ElPopover
+                  v-if="isFileParam(param) && runtimeFileFromCandidate(candidate)"
+                  :visible="isFilePreviewVisible(candidate.id)"
+                  placement="top"
+                  :width="280"
+                  popper-class="fm-file-preview-popper"
+                  :show-arrow="false">
+                  <template #reference>
+                    <ElTag
+                      size="small"
+                      effect="plain"
+                      closable
+                      class="fm-runtime-file-tag"
+                      @mouseenter="showFilePreview(candidate.id)"
+                      @mouseleave="hideFilePreview(candidate.id)"
+                      @click.stop="toggleFilePreview(candidate.id)"
+                      @close="removeCandidateValue(param, candidate.id)">
+                      {{ candidateLabel(candidate, param) }}
+                    </ElTag>
+                  </template>
+                  <div
+                    v-if="runtimeFileFromCandidate(candidate)"
+                    class="fm-file-preview"
+                    @mouseenter="showFilePreview(candidate.id)"
+                    @mouseleave="hideFilePreview(candidate.id)">
+                    <img
+                      v-if="runtimeFileFromCandidate(candidate)?.previewUrl"
+                      :src="runtimeFileFromCandidate(candidate)?.previewUrl"
+                      :alt="runtimeFileFromCandidate(candidate)?.name">
+                    <div v-else class="fm-file-preview-icon">{{ filePreviewMark(runtimeFileFromCandidate(candidate)!) }}</div>
+                    <div class="fm-file-preview-meta">
+                      <strong>{{ runtimeFileFromCandidate(candidate)?.name }}</strong>
+                      <span>{{ filePreviewType(runtimeFileFromCandidate(candidate)!) }} · {{ formatSize(runtimeFileFromCandidate(candidate)!.size) }}</span>
+                    </div>
+                  </div>
+                </ElPopover>
+                <ElTooltip v-else :content="candidateLabel(candidate, param)" :show-after="400" placement="top">
+                  <ElTag size="small" effect="plain" closable @close="removeCandidateValue(param, candidate.id)">
+                    {{ candidateLabel(candidate, param) }}
+                  </ElTag>
+                </ElTooltip>
+              </template>
+            </template>
+            <span v-else class="fm-runtime-empty">未添加候选值</span>
           </div>
-          <div v-if="editorCandidates.length" class="fm-candidate-items">
-            <div v-for="candidate in editorCandidates" :key="candidate.id" class="fm-candidate-row">
-              <span>{{ candidateLabel(candidate, editingParam) }}</span>
-              <ElButton :size="rowActionSize" text type="danger" @click="removeCandidate(editingParam, candidate.id)">删除</ElButton>
-            </div>
-          </div>
-          <ElEmpty v-else description="还没有候选值，先在上方添加。" />
         </div>
-      </div>
-      <template #footer>
-        <ElButton @click="editorVisible = false">完成</ElButton>
-      </template>
-    </ElDialog>
+
+        <div class="fm-runtime-actions">
+          <ElButton v-if="!isFileParam(param) && !isModelParam(param)" :size="rowActionSize" type="primary" @click="addTextDraft(param)">添加</ElButton>
+          <ElButton :size="rowActionSize" @click="clearParamValues(param)">清空</ElButton>
+        </div>
+      </article>
+    </div>
+    <ElEmpty v-else description="该配置没有运行时输入，开始运行会按固定参数创建 1 个任务。" />
 
     <input ref="fileInputRef" class="fm-hidden-input" type="file" :accept="fileInputAccept" multiple @change="handleRuntimeFiles">
   </section>
@@ -132,6 +135,7 @@
 
 <script setup lang="ts">
 import { ElMessage } from 'element-plus'
+import { formatSize } from '~/utils/gallery'
 
 interface NodeParam {
   nodeId: string
@@ -201,18 +205,17 @@ const emit = defineEmits<{
 
 const valueBuckets = reactive<Record<string, RuntimeCandidate[]>>({})
 const fileBuckets = reactive<Record<string, RuntimeFile[]>>({})
+const textDrafts = reactive<Record<string, string>>({})
 const resources = ref<BackendResource[]>([])
 const resourceLoading = ref(false)
-const editorVisible = ref(false)
-const editingParam = ref<NodeParam | null>(null)
-const textDraft = ref('')
-const modelDraft = ref<string[]>([])
 const fileInputRef = ref<HTMLInputElement>()
 const fileInputAccept = ref('')
 const filePickerTarget = ref<{ key: string; param: NodeParam } | null>(null)
-
-const editingKey = computed(() => editingParam.value ? paramKey(editingParam.value) : '')
-const editorCandidates = computed(() => editingParam.value ? candidatesFor(editingParam.value) : [])
+const filePreviewState = reactive({
+  activeId: '',
+  pinnedId: ''
+})
+const filePreviewHideTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 watch(
   () => props.params,
@@ -225,6 +228,7 @@ watch(
         const defaultText = valueToText(param.defaultValue)
         valueBuckets[key] = defaultText ? [createCandidate(parseValue(defaultText, param.inferredType))] : []
       }
+      textDrafts[key] ||= ''
     }
     pruneRemovedParams(params)
     void fetchResources()
@@ -238,27 +242,20 @@ watch(() => props.backendId, () => {
   void fetchResources()
 })
 
-function openEditor(param: NodeParam) {
-  editingParam.value = param
-  textDraft.value = ''
-  modelDraft.value = []
-  editorVisible.value = true
-  if (isModelParam(param)) void fetchResources()
-}
-
-function addTextDraft() {
-  const param = editingParam.value
-  const text = textDraft.value.trim()
-  if (!param || !text) return
+function addTextDraft(param: NodeParam) {
+  const key = paramKey(param)
+  const text = textDrafts[key]?.trim()
+  if (!text) return
   addCandidate(param, parseValue(text, param.inferredType))
-  textDraft.value = ''
+  textDrafts[key] = ''
 }
 
-function addModelDraft() {
-  const param = editingParam.value
-  if (!param || !modelDraft.value.length) return
-  for (const value of modelDraft.value) addCandidate(param, value)
-  modelDraft.value = []
+function modelValues(param: NodeParam) {
+  return candidatesFor(param).map(candidate => String(candidate.value))
+}
+
+function setModelValues(param: NodeParam, values: string[]) {
+  valueBuckets[paramKey(param)] = values.map(value => createCandidate(value))
 }
 
 function addCandidate(param: NodeParam, value: unknown) {
@@ -273,10 +270,29 @@ function removeCandidate(param: NodeParam, id: string) {
   valueBuckets[key] = (valueBuckets[key] || []).filter(candidate => candidate.id !== id)
 }
 
+function removeCandidateValue(param: NodeParam, id: string) {
+  if (isFileParam(param)) {
+    removeRuntimeFile(param, id)
+    return
+  }
+  removeCandidate(param, id)
+}
+
+function removeRuntimeFile(param: NodeParam, id: string) {
+  const file = fileBuckets[paramKey(param)]?.find(item => item.id === id)
+  if (!file) return
+  closeFilePreview(id)
+  file.deleted = true
+  revokeFile(file)
+}
+
 function clearParamValues(param: NodeParam) {
   const key = paramKey(param)
   if (isFileParam(param)) {
-    for (const file of fileBuckets[key] || []) revokeFile(file)
+    for (const file of fileBuckets[key] || []) {
+      closeFilePreview(file.id)
+      revokeFile(file)
+    }
     fileBuckets[key] = []
   } else {
     valueBuckets[key] = []
@@ -352,7 +368,10 @@ function applyCopiedParams(inputParams: Record<string, unknown>) {
       continue
     }
 
-    valueBuckets[key] = [createCandidate(inputParams[key])]
+    const raw = inputParams[key]
+    // Support both single values and arrays of candidate values
+    const values = Array.isArray(raw) ? raw : [raw]
+    valueBuckets[key] = values.map(v => createCandidate(v))
     applied++
   }
 
@@ -425,18 +444,69 @@ function candidatesFor(param: NodeParam) {
     : valueBuckets[paramKey(param)] || []
 }
 
-function candidatePreview(param: NodeParam) {
-  return candidatesFor(param).slice(0, 4)
-}
-
 function candidateCount(param: NodeParam) {
   return candidatesFor(param).length
 }
 
 function candidateLabel(candidate: RuntimeCandidate, param: NodeParam) {
   if (isFileParam(param) && isRuntimeFile(candidate.value)) return candidate.value.name
-  const text = valueToText(candidate.value)
-  return text.length > 34 ? `${text.slice(0, 34)}...` : text
+  return valueToText(candidate.value)
+}
+
+function runtimeFileFromCandidate(candidate: RuntimeCandidate) {
+  return isRuntimeFile(candidate.value) ? candidate.value : null
+}
+
+function showFilePreview(id: string) {
+  clearFilePreviewTimer(id)
+  filePreviewState.activeId = id
+}
+
+function hideFilePreview(id: string) {
+  if (filePreviewState.pinnedId === id) return
+  clearFilePreviewTimer(id)
+  filePreviewHideTimers.set(id, setTimeout(() => {
+    if (filePreviewState.pinnedId !== id && filePreviewState.activeId === id) filePreviewState.activeId = ''
+    filePreviewHideTimers.delete(id)
+  }, 120))
+}
+
+function toggleFilePreview(id: string) {
+  clearFilePreviewTimer(id)
+  if (filePreviewState.pinnedId === id) {
+    closeFilePreview(id)
+    return
+  }
+  filePreviewState.pinnedId = id
+  filePreviewState.activeId = id
+}
+
+function closeFilePreview(id: string) {
+  clearFilePreviewTimer(id)
+  if (filePreviewState.pinnedId === id) filePreviewState.pinnedId = ''
+  if (filePreviewState.activeId === id) filePreviewState.activeId = ''
+}
+
+function clearFilePreviewTimer(id: string) {
+  const timer = filePreviewHideTimers.get(id)
+  if (!timer) return
+  clearTimeout(timer)
+  filePreviewHideTimers.delete(id)
+}
+
+function isFilePreviewVisible(id: string) {
+  return filePreviewState.activeId === id || filePreviewState.pinnedId === id
+}
+
+function filePreviewType(file: RuntimeFile) {
+  return file.type || '未知类型'
+}
+
+function filePreviewMark(file: RuntimeFile) {
+  if (file.type.startsWith('video/')) return 'VID'
+  if (file.type.startsWith('audio/')) return 'AUD'
+  if (file.type === 'application/json' || file.name.toLowerCase().endsWith('.json')) return 'JSON'
+  return 'FILE'
 }
 
 function isModelParam(param: NodeParam) {
@@ -560,12 +630,6 @@ function readableParamName(param: NodeParam) {
   return matched?.[1] || param.inputName
 }
 
-function editorHelp(param: NodeParam) {
-  if (isFileParam(param)) return '选择一个或多个文件作为候选值。'
-  if (isModelParam(param)) return '从已同步的后端资源中多选，添加后会成为候选值。'
-  return '输入一个值后点击添加；每个候选值会独立参与组合。'
-}
-
 function singleValuePlaceholder(param: NodeParam) {
   if (param.inferredType === 'SEED') return '输入随机种子，-1 表示随机'
   if (param.inferredType === 'BOOLEAN') return 'true / false'
@@ -598,6 +662,7 @@ function paramKey(param: NodeParam) {
 function pruneRemovedParams(params: NodeParam[]) {
   const keys = new Set(params.map(paramKey))
   for (const key of Object.keys(valueBuckets)) if (!keys.has(key)) Reflect.deleteProperty(valueBuckets, key)
+  for (const key of Object.keys(textDrafts)) if (!keys.has(key)) Reflect.deleteProperty(textDrafts, key)
   for (const key of Object.keys(fileBuckets)) {
     if (!keys.has(key)) {
       for (const file of fileBuckets[key] || []) revokeFile(file)
@@ -615,6 +680,8 @@ function isRuntimeFile(value: unknown): value is RuntimeFile {
 }
 
 onBeforeUnmount(() => {
+  for (const timer of filePreviewHideTimers.values()) clearTimeout(timer)
+  filePreviewHideTimers.clear()
   for (const bucket of Object.values(fileBuckets)) {
     for (const file of bucket) revokeFile(file)
   }
@@ -624,8 +691,7 @@ defineExpose({ collectParams, applyCopiedParams })
 </script>
 
 <style scoped>
-.fm-runtime-panel,
-.fm-value-editor {
+.fm-runtime-panel {
   display: grid;
   gap: 16px;
 }
@@ -633,21 +699,14 @@ defineExpose({ collectParams, applyCopiedParams })
 .fm-panel-heading,
 .fm-runtime-row,
 .fm-runtime-param,
-.fm-runtime-actions,
-.fm-editor-head,
-.fm-editor-adder,
-.fm-candidate-head,
-.fm-candidate-row {
+.fm-runtime-actions {
   display: flex;
   align-items: center;
   gap: 12px;
   min-width: 0;
 }
 
-.fm-panel-heading,
-.fm-editor-head,
-.fm-candidate-head,
-.fm-candidate-row {
+.fm-panel-heading {
   justify-content: space-between;
 }
 
@@ -660,24 +719,21 @@ defineExpose({ collectParams, applyCopiedParams })
 .fm-panel-heading small,
 .fm-runtime-param span,
 .fm-runtime-empty,
-.fm-more-count,
-.fm-editor-head span,
-.fm-candidate-head span,
 .fm-option-meta {
   color: var(--fm-muted);
   font-size: 12px;
 }
 
-.fm-runtime-table,
-.fm-candidate-list,
-.fm-candidate-items {
+.fm-runtime-table {
   display: grid;
   gap: 8px;
 }
 
 .fm-runtime-row {
   display: grid;
-  grid-template-columns: minmax(220px, 0.9fr) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(220px, 260px) minmax(0, 1fr) 104px;
+  align-items: start;
+  gap: 16px;
   padding: 10px 12px;
   border: 1px solid var(--fm-border);
   border-radius: var(--fm-radius);
@@ -688,15 +744,13 @@ defineExpose({ collectParams, applyCopiedParams })
   justify-content: space-between;
 }
 
-.fm-runtime-param div,
-.fm-editor-head div {
+.fm-runtime-param div {
   display: grid;
   gap: 4px;
   min-width: 0;
 }
 
-.fm-runtime-param strong,
-.fm-editor-head strong {
+.fm-runtime-param strong {
   overflow: hidden;
   color: var(--fm-text);
   font-size: 14px;
@@ -704,23 +758,44 @@ defineExpose({ collectParams, applyCopiedParams })
   white-space: nowrap;
 }
 
+.fm-runtime-editor {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
 .fm-runtime-values {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   min-width: 0;
+  overflow: hidden;
+}
+
+.fm-runtime-values :deep(.el-tag) {
+  max-width: 100%;
+}
+
+.fm-runtime-values :deep(.el-tag .el-tag__content) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fm-runtime-file-tag {
+  cursor: pointer;
 }
 
 .fm-runtime-actions {
-  justify-content: flex-end;
+  display: grid;
+  gap: 8px;
+  align-self: start;
+  width: 104px;
 }
 
-.fm-editor-adder {
-  align-items: flex-start;
-}
-
-.fm-editor-adder .el-button {
-  flex: 0 0 auto;
+.fm-runtime-actions .el-button {
+  margin-left: 0;
+  width: 100%;
 }
 
 .fm-upload-panel {
@@ -739,6 +814,20 @@ defineExpose({ collectParams, applyCopiedParams })
   transition:
     border-color 160ms ease,
     background 160ms ease;
+}
+
+.fm-upload-panel--inline {
+  min-height: 72px;
+  padding: 10px 12px;
+}
+
+.fm-upload-panel--inline .fm-upload-mark {
+  width: 44px;
+  height: 44px;
+}
+
+.fm-upload-panel--inline .fm-upload-count strong {
+  font-size: 20px;
 }
 
 .fm-upload-panel:hover,
@@ -773,8 +862,7 @@ defineExpose({ collectParams, applyCopiedParams })
 }
 
 .fm-upload-main strong,
-.fm-upload-count strong,
-.fm-candidate-head strong {
+.fm-upload-count strong {
   color: var(--fm-text);
 }
 
@@ -797,52 +885,122 @@ defineExpose({ collectParams, applyCopiedParams })
   line-height: 1;
 }
 
-.fm-candidate-list {
-  padding: 12px;
-  border: 1px solid var(--fm-border);
-  border-radius: var(--fm-radius);
-  background: color-mix(in srgb, var(--fm-panel-muted) 58%, transparent);
-}
-
-.fm-candidate-items {
-  max-height: min(320px, 42vh);
-  overflow: auto;
-}
-
-.fm-candidate-row {
-  padding: 8px 10px;
-  border-radius: var(--fm-radius);
-  background: color-mix(in srgb, var(--fm-panel) 58%, transparent);
-}
-
-.fm-candidate-row span {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--fm-text);
-  font-size: 13px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .fm-hidden-input {
   display: none;
 }
 
-@media (max-width: 900px) {
-  .fm-runtime-row,
-  .fm-upload-panel,
-  .fm-editor-adder {
-    grid-template-columns: 1fr;
+:global(.fm-file-preview-popper) {
+  border: 1px solid var(--fm-border) !important;
+  background: var(--fm-panel) !important;
+  color: var(--fm-text) !important;
+  box-shadow: var(--el-box-shadow-light) !important;
+}
+
+.fm-file-preview {
+  display: grid;
+  gap: 10px;
+}
+
+.fm-file-preview img {
+  width: 100%;
+  max-height: 220px;
+  border: 1px solid var(--fm-border);
+  border-radius: calc(var(--fm-radius) - 4px);
+  background: var(--fm-bg);
+  object-fit: contain;
+}
+
+.fm-file-preview-icon {
+  display: grid;
+  place-items: center;
+  height: 128px;
+  border: 1px solid var(--fm-border);
+  border-radius: calc(var(--fm-radius) - 4px);
+  background: color-mix(in srgb, var(--fm-primary) 10%, var(--fm-panel-muted));
+  color: var(--fm-text);
+  font-weight: 800;
+}
+
+.fm-file-preview-meta {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.fm-file-preview-meta strong,
+.fm-file-preview-meta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fm-file-preview-meta strong {
+  color: var(--fm-text);
+  font-size: 13px;
+}
+
+.fm-file-preview-meta span {
+  color: var(--fm-muted);
+  font-size: 12px;
+}
+
+@media (max-width: 1180px) {
+  .fm-panel-heading {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .fm-runtime-row {
-    display: grid;
+    grid-template-columns: 1fr;
   }
 
-  .fm-runtime-actions,
+  .fm-runtime-param {
+    align-items: flex-start;
+  }
+
+  .fm-upload-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .fm-runtime-actions {
+    width: 100%;
+  }
+
+  .fm-runtime-actions .el-button {
+    width: 100%;
+  }
+
   .fm-upload-count {
     justify-content: flex-start;
     text-align: left;
+  }
+}
+
+@media (max-width: 640px) {
+  .fm-runtime-panel {
+    gap: 12px;
+  }
+
+  .fm-runtime-row {
+    gap: 12px;
+    padding: 10px;
+  }
+
+  .fm-runtime-param {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+  }
+
+  .fm-upload-panel {
+    gap: 10px;
+    min-height: 0;
+  }
+
+  .fm-upload-mark,
+  .fm-upload-panel--inline .fm-upload-mark {
+    width: 40px;
+    height: 40px;
   }
 }
 </style>

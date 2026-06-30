@@ -1,7 +1,9 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <script setup lang="ts">
+import { Download, FullScreen, InfoFilled, RefreshLeft, RefreshRight, ZoomIn, ZoomOut } from '@element-plus/icons-vue'
 import type { ResultFile, ResultFilterGroup } from '~/types/gallery'
 import {
+  formatSize,
   isAudioResult,
   isImageResult,
   isVideoResult,
@@ -17,7 +19,6 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  preview: [result: ResultFile]
   download: [id: string]
 }>()
 
@@ -25,11 +26,15 @@ const { rowActionSize } = useUiPreferences()
 const hiddenValueKeys = ref<string[]>([])
 const rowAxisKey = ref('')
 const columnAxisKey = ref('')
+const resultInfoVisible = ref(false)
+const activePreviewResult = ref<ResultFile | null>(null)
 
 const visibleResults = computed(() => props.results.filter((result) => {
   const params = visibleInputParams(result.inputParams ?? {})
   return !params.some(([key, value]) => hiddenValueKeys.value.includes(paramValueKey(key, value)))
 }))
+const imageResults = computed(() => visibleResults.value.filter(isImageResult))
+const imagePreviewUrls = computed(() => imageResults.value.map(resultUrl))
 
 const filterGroups = computed<ResultFilterGroup[]>(() => {
   const groups = new Map<string, Map<string, { value: unknown; count: number }>>()
@@ -70,6 +75,20 @@ const matrixColumns = computed(() => visibleColumns.value.length
   ? visibleColumns.value
   : [{ valueKey: 'all', label: '全部结果', count: visibleResults.value.length, hidden: false }]
 )
+
+const tableData = computed(() => {
+  return matrixRows.value.map(row => {
+    const rowData: Record<string, unknown> = {
+      _rowValueKey: row.valueKey,
+      _rowLabel: row.label,
+      _rowGroupLabel: selectedRowGroup.value?.label || ''
+    }
+    for (const column of matrixColumns.value) {
+      rowData[column.valueKey] = cellResults(row.valueKey, column.valueKey)
+    }
+    return rowData
+  })
+})
 
 watch(filterGroups, (groups) => {
   if (!groups.length) {
@@ -128,6 +147,25 @@ function cellResults(rowValueKey: string, columnValueKey: string) {
     const columnMatched = !columnGroup || columnValueKey === 'all' || paramValueKey(columnGroup.key, result.inputParams?.[columnGroup.key]) === columnValueKey
     return rowMatched && columnMatched
   })
+}
+
+function imagePreviewIndex(result: ResultFile) {
+  const index = imageResults.value.findIndex(item => item.id === result.id)
+  return Math.max(0, index)
+}
+
+function downloadPreviewImage(activeIndex: number, fallback: ResultFile) {
+  const result = previewResult(activeIndex, fallback)
+  emit('download', result.id)
+}
+
+function showPreviewInfo(activeIndex: number, fallback: ResultFile) {
+  activePreviewResult.value = previewResult(activeIndex, fallback)
+  resultInfoVisible.value = true
+}
+
+function previewResult(activeIndex: number, fallback: ResultFile) {
+  return imageResults.value[activeIndex] || fallback
 }
 </script>
 
@@ -234,43 +272,123 @@ function cellResults(rowValueKey: string, columnValueKey: string) {
       <ElButton v-if="hiddenValueKeys.length" :size="rowActionSize" @click="restorePreset">恢复预设</ElButton>
     </div>
 
-    <div v-if="visibleResults.length" class="matrix-scroll fm-card fm-scroll-card">
-      <table class="result-matrix">
-        <thead>
-          <tr>
-            <th class="matrix-corner" :title="selectedRowGroup?.key || '参数'">{{ selectedRowGroup?.label || '参数' }}</th>
-            <th v-for="column in matrixColumns" :key="column.valueKey">
-              <span v-if="selectedColumnGroup" :title="selectedColumnGroup.key">{{ selectedColumnGroup.label }}</span>
+    <div v-if="visibleResults.length" class="flex overflow-hidden">
+      <ElTable :data="tableData" class="fm-result-matrix-table flex-1" style="width: 100%" max-height="70vh" border>
+        <ElTableColumn
+          prop="_rowLabel"
+          :label="selectedRowGroup?.label || '参数'"
+          fixed="left"
+          min-width="180"
+        >
+          <template #header>
+            <div class="row-header">
+              <span v-if="selectedRowGroup" class="row-header-label">{{ selectedRowGroup.label }}</span>
+              <strong>{{ selectedRowGroup?.label || '参数' }}</strong>
+            </div>
+          </template>
+          <template #default="{ row }">
+            <div class="row-header">
+              <span v-if="row._rowGroupLabel" class="row-header-label">{{ row._rowGroupLabel }}</span>
+              <strong :title="String(row._rowLabel)">{{ row._rowLabel }}</strong>
+            </div>
+          </template>
+        </ElTableColumn>
+        <ElTableColumn
+          v-for="column in matrixColumns"
+          :key="column.valueKey"
+          :prop="column.valueKey"
+          :label="column.label"
+          min-width="200"
+        >
+          <template #header>
+            <div class="column-header">
+              <span v-if="selectedColumnGroup" class="column-header-label">{{ selectedColumnGroup.label }}</span>
               <strong :title="column.label">{{ column.label }}</strong>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="row in matrixRows" :key="row.valueKey">
-            <th>
-              <span v-if="selectedRowGroup" :title="selectedRowGroup.key">{{ selectedRowGroup.label }}</span>
-              <strong :title="row.label">{{ row.label }}</strong>
-            </th>
-            <td v-for="column in matrixColumns" :key="column.valueKey">
-              <div class="matrix-cell">
-                <template v-for="result in cellResults(row.valueKey, column.valueKey)" :key="result.id">
-                  <button v-if="isImageResult(result)" class="matrix-media" type="button" @click="emit('preview', result)">
-                    <img :src="resultUrl(result)" :alt="result.fileName" >
-                  </button>
-                  <video v-else-if="isVideoResult(result)" class="matrix-media" :src="resultUrl(result)" controls preload="metadata" />
-                  <audio v-else-if="isAudioResult(result)" class="matrix-audio" :src="resultUrl(result)" controls />
-                  <button v-else class="matrix-file" type="button" @click="emit('download', result.id)">
-                    {{ resultKindLabel(result) }}
-                  </button>
-                </template>
-              </div>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+            </div>
+          </template>
+          <template #default="{ row }">
+            <div class="matrix-cell">
+              <template v-for="result in (row[column.valueKey] as ResultFile[])" :key="result.id">
+                <ElImage
+                  v-if="isImageResult(result)"
+                  class="matrix-media matrix-image"
+                  :src="resultUrl(result)"
+                  :alt="result.fileName"
+                  fit="cover"
+                  :preview-src-list="imagePreviewUrls"
+                  :initial-index="imagePreviewIndex(result)"
+                  :preview-teleported="true"
+                  :hide-on-click-modal="true"
+                  :infinite="false"
+                  show-progress
+                >
+                  <template #toolbar="{ actions, reset, activeIndex }">
+                    <ElIcon title="缩小" @click="actions('zoomOut')"><ZoomOut /></ElIcon>
+                    <ElIcon title="放大" @click="actions('zoomIn')"><ZoomIn /></ElIcon>
+                    <i class="el-image-viewer__actions__divider" />
+                    <ElIcon title="重置视图" @click="reset"><FullScreen /></ElIcon>
+                    <i class="el-image-viewer__actions__divider" />
+                    <ElIcon title="逆时针旋转" @click="actions('anticlockwise')"><RefreshLeft /></ElIcon>
+                    <ElIcon title="顺时针旋转" @click="actions('clockwise')"><RefreshRight /></ElIcon>
+                    <i class="el-image-viewer__actions__divider" />
+                    <ElIcon title="文件信息" @click="showPreviewInfo(activeIndex, result)"><InfoFilled /></ElIcon>
+                    <ElIcon title="下载当前图片" @click="downloadPreviewImage(activeIndex, result)"><Download /></ElIcon>
+                  </template>
+                  <template #progress="{ activeIndex, total }">
+                    <span class="viewer-progress-text">{{ activeIndex + 1 }} / {{ total }}</span>
+                  </template>
+                  <template #error>
+                    <span class="matrix-image-error">图片加载失败</span>
+                  </template>
+                </ElImage>
+                <video v-else-if="isVideoResult(result)" class="matrix-media" :src="resultUrl(result)" controls preload="metadata" />
+                <audio v-else-if="isAudioResult(result)" class="matrix-audio" :src="resultUrl(result)" controls />
+                <button v-else class="matrix-file" type="button" @click="emit('download', result.id)">
+                  {{ resultKindLabel(result) }}
+                </button>
+              </template>
+            </div>
+          </template>
+        </ElTableColumn>
+      </ElTable>
     </div>
     <ElEmpty v-else-if="results.length" description="当前结果都被筛选隐藏了，显示更多参数值即可恢复。" />
     <ElEmpty v-else description="这个批次还没有可显示的结果。" />
+
+    <ElDialog
+      v-model="resultInfoVisible"
+      title="文件信息"
+      width="520px"
+      append-to-body
+      class="fm-viewer-info-dialog"
+    >
+      <div v-if="activePreviewResult" class="viewer-info-content">
+        <div class="meta-item">
+          <span>文件名</span>
+          <strong>{{ activePreviewResult.fileName }}</strong>
+        </div>
+        <div class="meta-item">
+          <span>文件大小</span>
+          <strong>{{ formatSize(activePreviewResult.fileSize) }}</strong>
+        </div>
+        <div class="meta-item">
+          <span>文件 ID</span>
+          <span class="mono">{{ activePreviewResult.id }}</span>
+        </div>
+        <template v-if="activePreviewResult.metadata">
+          <h3>生成元数据</h3>
+          <div v-for="(value, key) in activePreviewResult.metadata" :key="key" class="meta-item">
+            <span>{{ key }}</span>
+            <strong v-if="typeof value !== 'object'">{{ value }}</strong>
+            <pre v-else class="code-pre">{{ JSON.stringify(value, null, 2) }}</pre>
+          </div>
+        </template>
+      </div>
+      <template #footer>
+        <ElButton @click="resultInfoVisible = false">关闭</ElButton>
+        <ElButton v-if="activePreviewResult" type="primary" @click="emit('download', activePreviewResult.id)">下载</ElButton>
+      </template>
+    </ElDialog>
   </div>
 </template>
 
@@ -385,53 +503,20 @@ function cellResults(rowValueKey: string, columnValueKey: string) {
 }
 
 .matrix-scroll {
+  --matrix-frame-padding: 12px;
+  padding: var(--matrix-frame-padding);
   scrollbar-gutter: stable;
 }
 
-.result-matrix {
-  width: max-content;
-  min-width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
-  color: var(--fm-text);
+.row-header,
+.column-header {
+  display: grid;
+  gap: 4px;
 }
 
-.result-matrix th,
-.result-matrix td {
-  min-width: 178px;
-  max-width: 220px;
-  padding: 10px;
-  border-right: 1px solid var(--fm-border);
-  border-bottom: 1px solid var(--fm-border);
-  background: color-mix(in srgb, var(--fm-panel-muted) 72%, transparent);
-  vertical-align: top;
-}
-
-.result-matrix thead th {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  background: color-mix(in srgb, var(--fm-panel-strong) 88%, transparent);
-  text-align: left;
-}
-
-.result-matrix tbody th,
-.result-matrix .matrix-corner {
-  position: sticky;
-  left: 0;
-  z-index: 3;
-  min-width: 180px;
-  background: color-mix(in srgb, var(--fm-panel-strong) 90%, transparent);
-  text-align: left;
-}
-
-.result-matrix .matrix-corner {
-  z-index: 4;
-}
-
-.result-matrix th span {
+.row-header-label,
+.column-header-label {
   display: block;
-  margin-bottom: 4px;
   overflow: hidden;
   color: var(--fm-muted);
   font-size: 11px;
@@ -439,7 +524,8 @@ function cellResults(rowValueKey: string, columnValueKey: string) {
   white-space: nowrap;
 }
 
-.result-matrix th strong {
+.row-header strong,
+.column-header strong {
   display: -webkit-box;
   overflow: hidden;
   color: var(--fm-text);
@@ -470,22 +556,88 @@ function cellResults(rowValueKey: string, columnValueKey: string) {
   overflow: hidden;
 }
 
-button.matrix-media,
+.matrix-image,
 .matrix-file {
-  padding: 0;
   cursor: pointer;
 }
 
-.matrix-media img,
+.matrix-image :deep(.el-image__inner),
 video.matrix-media {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
+.matrix-image :deep(.el-image__wrapper) {
+  width: 100%;
+  height: 100%;
+}
+
+.matrix-image-error {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  padding: 8px;
+  color: var(--fm-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
 .matrix-audio {
   width: 132px;
   min-height: 48px;
+}
+
+.viewer-info-content {
+  display: grid;
+  gap: 10px;
+  max-height: min(62vh, 560px);
+  overflow: auto;
+}
+
+.viewer-info-content h3 {
+  margin: 0;
+  color: var(--fm-primary);
+  font-size: 14px;
+}
+
+.meta-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--fm-muted);
+  font-size: 13px;
+}
+
+.meta-item strong {
+  color: var(--fm-text);
+  text-align: right;
+  word-break: break-all;
+}
+
+.code-pre {
+  width: 100%;
+  margin: 4px 0 0;
+  padding: 6px;
+  overflow-x: auto;
+  border: 1px solid var(--fm-border);
+  border-radius: 4px;
+  background: var(--fm-panel-muted);
+  color: var(--fm-text);
+  font-family: monospace;
+  font-size: 11px;
+  text-align: left;
+}
+
+.mono {
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.viewer-progress-text {
+  font-variant-numeric: tabular-nums;
 }
 
 @media (max-width: 760px) {
@@ -495,4 +647,140 @@ video.matrix-media {
     flex-direction: column;
   }
 }
+</style>
+
+<style lang="scss">
+.fm-result-matrix-table {
+  --matrix-header-bg: var(--fm-panel-strong);
+  --matrix-cell-bg: var(--fm-panel-muted);
+  --matrix-cell-hover-bg: color-mix(in srgb, var(--fm-primary) 7%, var(--fm-panel-muted));
+
+  border-radius: calc(var(--fm-radius) - 2px);
+  border: 0;
+  background: var(--matrix-cell-bg);
+  box-shadow: none;
+
+  &.el-table--border::before,
+  &.el-table--border::after,
+  &.el-table--border .el-table__inner-wrapper::after {
+    display: none;
+  }
+
+  .el-table__inner-wrapper::before {
+    display: none;
+  }
+
+  .el-table__header-wrapper,
+  .el-table__body-wrapper {
+    background: var(--matrix-cell-bg);
+  }
+
+  th.el-table__cell {
+    background: var(--matrix-header-bg);
+  }
+
+  td.el-table__cell {
+    background: var(--matrix-cell-bg);
+  }
+
+  th.el-table-fixed-column--left,
+  th.el-table-fixed-column--right {
+    background: var(--matrix-header-bg) !important;
+  }
+
+  td.el-table-fixed-column--left,
+  td.el-table-fixed-column--right {
+    background: var(--matrix-cell-bg) !important;
+  }
+
+  .el-table__body tr:hover > td.el-table-fixed-column--left,
+  .el-table__body tr:hover > td.el-table-fixed-column--right {
+    background: var(--matrix-cell-hover-bg) !important;
+  }
+
+  .el-table-fixed-column--left.is-last-column::before {
+    box-shadow: 10px 0 18px -12px rgba(0, 0, 0, 0.42) !important;
+  }
+
+  .el-table-fixed-column--right.is-first-column::before {
+    box-shadow: -10px 0 18px -12px rgba(0, 0, 0, 0.42) !important;
+  }
+
+  th.el-table__cell > .cell,
+  td.el-table__cell > .cell {
+    padding: 12px;
+  }
+
+  .el-table--enable-row-hover .el-table__body tr:hover > td.el-table__cell {
+    background: var(--matrix-cell-hover-bg);
+  }
+
+  .el-table__fixed,
+  .el-table__fixed-right {
+    background: var(--matrix-cell-bg);
+    box-shadow: 10px 0 24px rgba(0, 0, 0, 0.14);
+  }
+
+  .el-table__fixed-right {
+    box-shadow: -10px 0 24px rgba(0, 0, 0, 0.14);
+  }
+
+  .el-table__fixed .el-table__fixed-body-wrapper,
+  .el-table__fixed-right .el-table__fixed-body-wrapper {
+    background: var(--matrix-cell-bg);
+  }
+
+  .el-table__fixed-header-wrapper,
+  .el-table__fixed-right-header-wrapper {
+    background: var(--matrix-header-bg);
+  }
+
+  .el-table__fixed-header-wrapper .el-table__cell,
+  .el-table__fixed-right-header-wrapper .el-table__cell {
+    background: var(--matrix-header-bg);
+  }
+
+  .el-table__fixed-body-wrapper .el-table__cell,
+  .el-table__fixed-right-body-wrapper .el-table__cell {
+    background: var(--matrix-cell-bg);
+  }
+
+  .el-table__border-left-patch,
+  .el-table__border-right-patch,
+  .el-table__border-bottom-patch {
+    display: none;
+  }
+}
+
+.fm-viewer-info-dialog {
+  .el-dialog {
+    border: 1px solid color-mix(in srgb, var(--fm-border) 82%, transparent);
+    background:
+      linear-gradient(180deg, color-mix(in srgb, var(--fm-glass-edge) 9%, transparent), transparent 42%),
+      color-mix(in srgb, var(--fm-popper-bg) 78%, transparent);
+    color: var(--fm-text);
+    box-shadow: var(--el-box-shadow-dark);
+    backdrop-filter: blur(var(--fm-blur)) saturate(1.14);
+    -webkit-backdrop-filter: blur(var(--fm-blur)) saturate(1.14);
+  }
+
+  .el-dialog__header,
+  .el-dialog__body,
+  .el-dialog__footer {
+    background: transparent;
+  }
+
+  .el-dialog__header {
+    border-bottom: 1px solid var(--fm-border);
+  }
+
+  .el-dialog__footer {
+    border-top: 1px solid var(--fm-border);
+  }
+
+  .el-dialog__title {
+    color: var(--fm-text);
+  }
+}
+
 </style>

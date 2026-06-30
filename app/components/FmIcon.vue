@@ -10,16 +10,21 @@ import chevronUpIcon from '@iconify-icons/lucide/chevron-up'
 import chevronsLeftIcon from '@iconify-icons/lucide/chevrons-left'
 import chevronsRightIcon from '@iconify-icons/lucide/chevrons-right'
 import cpuIcon from '@iconify-icons/lucide/cpu'
+import downloadIcon from '@iconify-icons/lucide/download'
 import homeIcon from '@iconify-icons/lucide/home'
 import imageIcon from '@iconify-icons/lucide/image'
 import infoIcon from '@iconify-icons/lucide/info'
 import listChecksIcon from '@iconify-icons/lucide/list-checks'
 import moreVerticalIcon from '@iconify-icons/lucide/more-vertical'
 import playIcon from '@iconify-icons/lucide/play'
+import rotateCcwIcon from '@iconify-icons/lucide/rotate-ccw'
+import rotateCwIcon from '@iconify-icons/lucide/rotate-cw'
 import settingsIcon from '@iconify-icons/lucide/settings'
 import uploadCloudIcon from '@iconify-icons/lucide/upload-cloud'
 import workflowIcon from '@iconify-icons/lucide/workflow'
 import xIcon from '@iconify-icons/lucide/x'
+import zoomInIcon from '@iconify-icons/lucide/zoom-in'
+import zoomOutIcon from '@iconify-icons/lucide/zoom-out'
 
 const props = defineProps<{
   name: string
@@ -36,16 +41,23 @@ const icons = {
   chevronsLeft: chevronsLeftIcon,
   chevronsRight: chevronsRightIcon,
   cpu: cpuIcon,
+  download: downloadIcon,
   home: homeIcon,
   image: imageIcon,
   info: infoIcon,
   listChecks: listChecksIcon,
   moreVertical: moreVerticalIcon,
   play: playIcon,
+  rotateCcw: rotateCcwIcon,
+  rotateCw: rotateCwIcon,
+  rotateLeft: rotateCcwIcon,
+  rotateRight: rotateCwIcon,
   settings: settingsIcon,
   uploadCloud: uploadCloudIcon,
   workflow: workflowIcon,
-  x: xIcon
+  x: xIcon,
+  zoomIn: zoomInIcon,
+  zoomOut: zoomOutIcon
 }
 
 const icon = computed(() => icons[props.name as keyof typeof icons] ?? homeIcon)

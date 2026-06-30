@@ -18,7 +18,7 @@ export default defineEventHandler((event) => {
            created_at, started_at, finished_at
     FROM run_tasks
     WHERE batch_run_id = ?
-    ORDER BY created_at ASC
+    ORDER BY json_extract(input_params, '$._taskIndex') ASC, created_at ASC, rowid ASC
     LIMIT ? OFFSET ?
   `).all(id, taskLimit, taskOffset) as Record<string, unknown>[]
 

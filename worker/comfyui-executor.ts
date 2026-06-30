@@ -63,16 +63,26 @@ export async function executeComfyUITask(taskId: string): Promise<void> {
   const sig = comfyui.extractModelSignature(patchedWorkflow)
   updateBackendModelSignature(decision.backendId, sig)
 
-  const clientId = `flowmatrix-${taskId}`
-  let promptResponse: comfyui.ComfyUIPromptResponse
-  try {
-    promptResponse = await comfyui.submitPrompt(endpoint, patchedWorkflow, clientId)
-  } catch (error) {
-    markBackendUnhealthy(decision.backendId)
-    throw error
-  }
+  // Check if we already have an external task ID (retry case) - skip resubmission
+  const existingExternalTaskId = task.external_task_id as string | null
+  let externalPromptId: string
 
-  updateTaskStatus(taskId, 'queued', { externalTaskId: promptResponse.prompt_id })
+  if (existingExternalTaskId) {
+    // Prompt was already submitted in a previous attempt - just continue polling
+    externalPromptId = existingExternalTaskId
+    updateTaskStatus(taskId, 'queued')
+  } else {
+    const clientId = `flowmatrix-${taskId}`
+    let promptResponse: comfyui.ComfyUIPromptResponse
+    try {
+      promptResponse = await comfyui.submitPrompt(endpoint, patchedWorkflow, clientId)
+    } catch (error) {
+      markBackendUnhealthy(decision.backendId)
+      throw error
+    }
+    externalPromptId = promptResponse.prompt_id
+    updateTaskStatus(taskId, 'queued', { externalTaskId: externalPromptId })
+  }
 
   let history: comfyui.ComfyUIHistoryItem | null = null
 
@@ -90,7 +100,7 @@ export async function executeComfyUITask(taskId: string): Promise<void> {
     }
 
     try {
-      history = await comfyui.getHistory(endpoint, promptResponse.prompt_id)
+      history = await comfyui.getHistory(endpoint, externalPromptId)
       if (history && !history.status.completed) history = null
     } catch {
       history = null
@@ -99,7 +109,7 @@ export async function executeComfyUITask(taskId: string): Promise<void> {
     try {
       const q = await comfyui.getQueueInfo(endpoint)
       const counts = comfyui.getQueueCounts(q)
-      const queueState = comfyui.getPromptQueueState(q, promptResponse.prompt_id)
+      const queueState = comfyui.getPromptQueueState(q, externalPromptId)
       updateBackendLoad(decision.backendId, counts.running, counts.pending)
       if (queueState === 'running') {
         updateTaskStatus(taskId, 'running')
@@ -150,7 +160,7 @@ export async function executeComfyUITask(taskId: string): Promise<void> {
   }
 
   updateTaskStatus(taskId, 'succeeded', {
-    resultJson: { outputs: results, promptId: promptResponse.prompt_id }
+    resultJson: { outputs: results, promptId: externalPromptId }
   })
   incrementBatchProgress(batchRunId, 'completed_tasks')
 }

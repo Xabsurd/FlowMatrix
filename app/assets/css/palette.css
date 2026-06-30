@@ -64,6 +64,8 @@
   --el-box-shadow: var(--fm-shadow);
   --el-box-shadow-light: var(--fm-shadow);
   --el-box-shadow-lighter: 0 10px 26px rgba(37, 54, 75, 0.1);
+  --el-popper-bg-color-dark: color-mix(in srgb, var(--fm-popper-bg) 82%, transparent);
+  --el-popper-bg-color-light: color-mix(in srgb, var(--fm-popper-bg) 82%, transparent);
 }
 
 @media (prefers-color-scheme: dark) {

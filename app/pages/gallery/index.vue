@@ -38,9 +38,17 @@ async function fetchBatchRuns(quiet = false) {
   }
 }
 
-async function fetchFirstTask(batchId: string) {
-  const detail = await $fetch<BatchDetail>(`/api/v1/batch/${batchId}?taskLimit=1&taskOffset=0`)
-  return detail.tasks[0] || null
+async function fetchAllTasks(batchId: string) {
+  const pageSize = 100
+  let offset = 0
+  let allTasks: Task[] = []
+  while (true) {
+    const detail = await $fetch<BatchDetail>(`/api/v1/batch/${batchId}?taskLimit=${pageSize}&taskOffset=${offset}`)
+    allTasks = allTasks.concat(detail.tasks)
+    if (allTasks.length >= detail.taskPage.total || detail.tasks.length < pageSize) break
+    offset += pageSize
+  }
+  return allTasks
 }
 
 function openResults(batchId: string) {
@@ -62,27 +70,35 @@ function openDetail(batchId: string) {
 async function copyBatchFirstTask(batch: BatchRun) {
   copyingBatchId.value = batch.id
   try {
-    const task = await fetchFirstTask(batch.id)
-    if (!task) {
+    const tasks = await fetchAllTasks(batch.id)
+    if (!tasks.length) {
       ElMessage.warning('这个批次没有可复制的任务')
       return
     }
-    copyTaskToRun(task)
+    // Collect all unique values per parameter across all tasks
+    const firstTask = tasks[0]!
+    const presetId = firstTask.presetId
+    const allInputParams: Record<string, unknown[]> = {}
+    for (const task of tasks) {
+      for (const [key, value] of visibleInputParams(task.inputParams)) {
+        if (!allInputParams[key]) allInputParams[key] = []
+        const json = JSON.stringify(value)
+        if (!allInputParams[key].some(v => JSON.stringify(v) === json)) {
+          allInputParams[key].push(value)
+        }
+      }
+    }
+    sessionStorage.setItem(COPIED_TASK_STORAGE_KEY, JSON.stringify({
+      presetId,
+      inputParams: allInputParams
+    }))
+    ElMessage.success(`已复制 ${Object.keys(allInputParams).length} 个参数，正在返回运行页`)
+    void navigateTo(`/runs?presetId=${presetId}`)
   } catch (error: unknown) {
     ElMessage.error(error instanceof Error ? error.message : '复制任务失败')
   } finally {
     copyingBatchId.value = ''
   }
-}
-
-function copyTaskToRun(task: Task) {
-  if (!import.meta.client) return
-  sessionStorage.setItem(COPIED_TASK_STORAGE_KEY, JSON.stringify({
-    presetId: task.presetId,
-    inputParams: Object.fromEntries(visibleInputParams(task.inputParams))
-  }))
-  ElMessage.success('已复制任务参数，正在返回运行页')
-  void navigateTo(`/runs?presetId=${task.presetId}`)
 }
 
 async function deleteBatchRun(batch: BatchRun) {

@@ -106,7 +106,7 @@ export function markFailed(jobId: string, error: string): void {
   }
 }
 
-export function releaseStale(maxAgeMs = 60_000): number {
+export function releaseStale(maxAgeMs = 30 * 60_000): number {
   const db = getSqlite()
   const cutoff = Date.now() - maxAgeMs
   const result = db.prepare(`

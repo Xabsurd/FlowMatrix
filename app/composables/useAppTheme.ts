@@ -73,7 +73,9 @@ function buildElementPlusBaseVariables(palette: ThemePalette, isDark: boolean) {
     '--el-mask-color-extra-light': mix(mask, 66),
     '--el-box-shadow': shadow,
     '--el-box-shadow-light': shadow,
-    '--el-box-shadow-lighter': isDark ? '0 10px 28px rgba(0, 0, 0, 0.26)' : '0 10px 26px rgba(37, 54, 75, 0.1)'
+    '--el-box-shadow-lighter': isDark ? '0 10px 28px rgba(0, 0, 0, 0.26)' : '0 10px 26px rgba(37, 54, 75, 0.1)',
+    '--el-popper-bg-color-dark': mix(popper, 82),
+    '--el-popper-bg-color-light': mix(popper, 82)
   }
 }
 
