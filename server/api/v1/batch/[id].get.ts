@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: GPL-3.0-or-later
 import { getBatchRun } from '../../../domain/batch'
 import { getSqlite } from '../../../infrastructure/db/sqlite'
 import { getResultStats } from '../../../domain/results'

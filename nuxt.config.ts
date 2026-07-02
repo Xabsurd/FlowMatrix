@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: GPL-3.0-or-later
 export default defineNuxtConfig({
   compatibilityDate: '2026-06-18',
   devtools: { enabled: true },

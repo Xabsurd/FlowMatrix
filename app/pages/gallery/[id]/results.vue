@@ -1,19 +1,41 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <script setup lang="ts">
 import { ElMessage } from 'element-plus'
 import type { BatchDetail, BatchRun, ResultFile, ResultsResponse } from '~/types/gallery'
 import { batchSubtitle, batchTitle } from '~/utils/gallery'
 
 const route = useRoute()
+const { t, locale } = useI18n()
+
+interface PresetParam {
+  nodeId: string
+  inputName: string
+  runtimeInput?: boolean
+}
+
+interface PresetDetail {
+  id: string
+  nodeParams: PresetParam[]
+}
 
 const batchId = computed(() => String(route.params.id || ''))
 const loading = ref(false)
 const batch = ref<BatchRun | null>(null)
 const results = ref<ResultFile[]>([])
+const preset = ref<PresetDetail | null>(null)
+
+const runtimeParamOrder = computed(() => {
+  return preset.value?.nodeParams
+    .filter(param => param.runtimeInput)
+    .map(param => `${param.nodeId}.${param.inputName}`) ?? []
+})
 
 async function fetchBatchMeta() {
   const detail = await $fetch<BatchDetail>(`/api/v1/batch/${batchId.value}?taskLimit=1&taskOffset=0`)
   batch.value = detail
+  preset.value = detail.presetId
+    ? await $fetch<PresetDetail>(`/api/v1/presets/${detail.presetId}`)
+    : null
 }
 
 async function fetchResults() {
@@ -30,7 +52,7 @@ async function fetchResults() {
     const response = await $fetch<ResultsResponse>(`/api/v1/results?${params}`)
     results.value = response.results
   } catch (error: unknown) {
-    ElMessage.error(error instanceof Error ? error.message : '获取结果失败')
+    ElMessage.error(error instanceof Error ? error.message : t('gallery.fetchResultsFailed'))
   } finally {
     loading.value = false
   }
@@ -55,28 +77,28 @@ onMounted(fetchResults)
   <section class="fm-page">
     <div class="fm-page-header">
       <div>
-        <h1 class="fm-page-title">运行结果</h1>
-        <p class="fm-page-subtitle">当前批次生成的图片、视频、音频和文件。</p>
+        <h1 class="fm-page-title">{{ t('gallery.resultTitle') }}</h1>
+        <p class="fm-page-subtitle">{{ t('gallery.resultSubtitle') }}</p>
       </div>
       <div class="actions">
         <ElButton @click="backToQueue">
           <FmIcon name="arrowLeft" :size="16" />
-          返回列表
+          {{ t('gallery.backToList') }}
         </ElButton>
-        <ElButton @click="openDetail">详情</ElButton>
-        <ElButton :loading="loading" type="primary" @click="fetchResults">刷新结果</ElButton>
+        <ElButton @click="openDetail">{{ t('gallery.detail') }}</ElButton>
+        <ElButton :loading="loading" type="primary" @click="fetchResults">{{ t('gallery.refreshResults') }}</ElButton>
       </div>
     </div>
 
     <div class="detail-header fm-card">
       <div>
-        <h2>{{ batch ? batchTitle(batch) : '运行结果' }}</h2>
-        <span>{{ batch ? batchSubtitle(batch) : batchId }}</span>
+        <h2>{{ batch ? batchTitle(batch, t, locale) : t('gallery.resultTitle') }}</h2>
+        <span>{{ batch ? batchSubtitle(batch, t, locale) : batchId }}</span>
       </div>
     </div>
 
     <section v-loading="loading">
-      <GalleryResultMatrix :results="results" @download="downloadResult" />
+      <GalleryResultMatrix :results="results" :param-order="runtimeParamOrder" @download="downloadResult" />
     </section>
   </section>
 </template>
@@ -101,3 +123,4 @@ onMounted(fetchResults)
 }
 
 </style>
+

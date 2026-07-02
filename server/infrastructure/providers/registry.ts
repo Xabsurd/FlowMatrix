@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: GPL-3.0-or-later
 import { openaiProviderAdapter } from './openai'
 import { createError } from 'h3'
 import type { OnlineProviderAdapter } from './types'

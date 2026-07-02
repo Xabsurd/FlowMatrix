@@ -1,12 +1,12 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <template>
   <section class="fm-page">
     <div class="fm-page-header">
       <div>
-        <h1 class="fm-page-title">工作流管理</h1>
-        <p class="fm-page-subtitle">上传 ComfyUI API Workflow JSON，解析节点并建立参数映射。</p>
+        <h1 class="fm-page-title">{{ t('workflows.title') }}</h1>
+        <p class="fm-page-subtitle">{{ t('workflows.subtitle') }}</p>
       </div>
-      <ElButton type="primary" @click="openUploadDialog">上传工作流</ElButton>
+      <ElButton type="primary" @click="openUploadDialog">{{ t('workflows.upload') }}</ElButton>
     </div>
 
     <div v-if="workflows.length" class="fm-workflow-list">
@@ -26,19 +26,19 @@
 
         <div class="fm-workflow-facts">
           <div>
-            <span>类型</span>
+            <span>{{ t('workflows.type') }}</span>
             <strong>{{ workflowKind(workflow) }}</strong>
           </div>
           <div>
-            <span>节点</span>
+            <span>{{ t('workflows.nodes') }}</span>
             <strong>{{ workflow.parsedNodes?.length || 0 }}</strong>
           </div>
           <div>
-            <span>版本</span>
+            <span>{{ t('workflows.version') }}</span>
             <strong>v{{ workflow.version }}</strong>
           </div>
           <div>
-            <span>更新时间</span>
+            <span>{{ t('workflows.updatedAt') }}</span>
             <strong>{{ formatTime(workflow.updatedAt) }}</strong>
           </div>
         </div>
@@ -53,24 +53,24 @@
             >
               {{ tag }}
             </ElTag>
-            <span v-if="!workflowTags(workflow).length">暂无标签</span>
+            <span v-if="!workflowTags(workflow).length">{{ t('workflows.noTags') }}</span>
           </div>
           <div class="fm-card-actions">
-            <ElButton text :size="rowActionSize" @click="openEditDialog(workflow)">编辑</ElButton>
-            <ElButton text :size="rowActionSize" type="danger" @click="removeWorkflow(workflow)">删除</ElButton>
+            <ElButton text :size="rowActionSize" @click="openEditDialog(workflow)">{{ t('workflows.edit') }}</ElButton>
+            <ElButton text :size="rowActionSize" type="danger" @click="removeWorkflow(workflow)">{{ t('common.delete') }}</ElButton>
           </div>
         </div>
       </article>
     </div>
 
-    <ElEmpty v-else-if="!loading" description="暂无工作流，点击「上传工作流」导入 ComfyUI API JSON。" />
+    <ElEmpty v-else-if="!loading" :description="t('workflows.empty')" />
 
-    <ElDialog v-model="showUploadDialog" :title="editingId ? '编辑工作流' : '上传工作流'" width="680px">
+    <ElDialog v-model="showUploadDialog" :title="editingId ? t('workflows.editDialog') : t('workflows.uploadDialog')" width="680px">
       <ElForm label-position="top">
-        <ElFormItem label="工作流名称" required>
-          <ElInput v-model="form.name" placeholder="例如：SDXL 海报生成" />
+        <ElFormItem :label="t('workflows.name')" required>
+          <ElInput v-model="form.name" :placeholder="t('workflows.namePlaceholder')" />
         </ElFormItem>
-        <ElFormItem label="标签">
+        <ElFormItem :label="t('workflows.tags')">
           <ElSelect
             v-model="form.tags"
             multiple
@@ -78,7 +78,7 @@
             allow-create
             default-first-option
             :reserve-keyword="false"
-            placeholder="选择已有标签，或输入后回车新建"
+            :placeholder="t('workflows.tagsPlaceholder')"
             style="width: 100%"
           >
             <ElOption
@@ -89,26 +89,26 @@
             />
           </ElSelect>
         </ElFormItem>
-        <ElFormItem label="JSON 文件">
+        <ElFormItem :label="t('workflows.jsonFile')">
           <div v-if="hasWorkflowJson" class="fm-uploaded-file">
             <div class="fm-uploaded-file-main">
               <div class="fm-uploaded-file-mark">JSON</div>
               <div class="fm-uploaded-file-copy">
-                <strong>{{ form.fileName || '已导入工作流 JSON' }}</strong>
+                <strong>{{ form.fileName || t('workflows.importedJson') }}</strong>
                 <span>{{ workflowFileSummary }}</span>
               </div>
             </div>
             <div class="fm-uploaded-file-facts">
               <div>
-                <span>大小</span>
+                <span>{{ t('workflows.size') }}</span>
                 <strong>{{ formatBytes(currentWorkflowJsonSize) }}</strong>
               </div>
               <div>
-                <span>节点</span>
+                <span>{{ t('workflows.nodes') }}</span>
                 <strong>{{ uploadedJsonInfo.nodeCount }}</strong>
               </div>
               <div>
-                <span>输入</span>
+                <span>{{ t('workflows.inputs') }}</span>
                 <strong>{{ uploadedJsonInfo.inputCount }}</strong>
               </div>
             </div>
@@ -119,9 +119,9 @@
                 accept=".json,application/json"
                 :on-change="readWorkflowFile"
               >
-                <ElButton :size="rowActionSize">重新上传</ElButton>
+                <ElButton :size="rowActionSize">{{ t('workflows.reupload') }}</ElButton>
               </ElUpload>
-              <ElButton :size="rowActionSize" type="danger" plain @click="clearWorkflowFile">删除文件</ElButton>
+              <ElButton :size="rowActionSize" type="danger" plain @click="clearWorkflowFile">{{ t('workflows.deleteFile') }}</ElButton>
             </div>
           </div>
           <ElUpload
@@ -134,25 +134,25 @@
             :on-change="readWorkflowFile"
           >
             <FmIcon class="fm-upload-icon" name="uploadCloud" :size="32" />
-            <div class="el-upload__text">拖拽 JSON 到这里，或点击选择文件</div>
+            <div class="el-upload__text">{{ t('workflows.uploadDrop') }}</div>
           </ElUpload>
         </ElFormItem>
         <ElCollapse class="fm-json-collapse">
-          <ElCollapseItem title="工作流 JSON" name="json">
+          <ElCollapseItem :title="t('workflows.json')" name="json">
             <ElFormItem required>
               <ElInput
                 v-model="form.jsonText"
                 type="textarea"
                 :rows="12"
-                placeholder="粘贴 ComfyUI 导出的 API Workflow JSON"
+                :placeholder="t('workflows.jsonPlaceholder')"
               />
             </ElFormItem>
           </ElCollapseItem>
         </ElCollapse>
       </ElForm>
       <template #footer>
-        <ElButton @click="showUploadDialog = false">取消</ElButton>
-        <ElButton type="primary" :loading="saving" @click="saveWorkflow">{{ editingId ? '保存修改' : '保存工作流' }}</ElButton>
+        <ElButton @click="showUploadDialog = false">{{ t('common.cancel') }}</ElButton>
+        <ElButton type="primary" :loading="saving" @click="saveWorkflow">{{ editingId ? t('workflows.saveChanges') : t('workflows.saveWorkflow') }}</ElButton>
       </template>
     </ElDialog>
   </section>
@@ -162,6 +162,7 @@
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { UploadFile } from 'element-plus'
 
+const { t, locale } = useI18n()
 const { rowActionSize } = useUiPreferences()
 
 interface ParsedNode {
@@ -222,7 +223,7 @@ const uploadedJsonInfo = computed(() => {
   }
 })
 const workflowFileSummary = computed(() => {
-  const updatedAt = form.fileUpdatedAt ? formatTime(form.fileUpdatedAt) : '刚刚'
+  const updatedAt = form.fileUpdatedAt ? formatTime(form.fileUpdatedAt) : t('workflows.justNow')
   return `${formatBytes(currentWorkflowJsonSize.value)} · ${updatedAt}`
 })
 
@@ -279,7 +280,7 @@ function clearWorkflowFile() {
 
 async function saveWorkflow() {
   if (!form.name.trim()) {
-    ElMessage.warning('请填写工作流名称')
+    ElMessage.warning(t('workflows.fillName'))
     return
   }
 
@@ -287,7 +288,7 @@ async function saveWorkflow() {
   try {
     rawJson = JSON.parse(form.jsonText) as Record<string, unknown>
   } catch {
-    ElMessage.error('工作流 JSON 格式不正确')
+    ElMessage.error(t('workflows.invalidJson'))
     return
   }
 
@@ -305,9 +306,9 @@ async function saveWorkflow() {
     })
     showUploadDialog.value = false
     await fetchWorkflows()
-    ElMessage.success(editingId.value ? '工作流已更新' : '工作流已保存')
+    ElMessage.success(editingId.value ? t('workflows.updated') : t('workflows.saved'))
   } catch (error: unknown) {
-    ElMessage.error(error instanceof Error ? error.message : '保存失败')
+    ElMessage.error(error instanceof Error ? error.message : t('workflows.saveFailed'))
   } finally {
     saving.value = false
   }
@@ -315,18 +316,18 @@ async function saveWorkflow() {
 
 async function removeWorkflow(workflow: Workflow) {
   try {
-    await ElMessageBox.confirm(`确定删除「${workflow.name}」？相关调用配置不会自动删除，请确认没有继续使用它。`, '删除工作流', { type: 'warning' })
+    await ElMessageBox.confirm(t('workflows.deleteConfirm', { name: workflow.name }), t('workflows.deleteTitle'), { type: 'warning' })
     await $fetch(`/api/v1/workflows/${workflow.id}`, { method: 'DELETE' })
     await fetchWorkflows()
-    ElMessage.success('工作流已删除')
+    ElMessage.success(t('workflows.deleted'))
   } catch (error: unknown) {
     if (error === 'cancel' || error === 'close') return
-    ElMessage.error(error instanceof Error ? error.message : '删除失败')
+    ElMessage.error(error instanceof Error ? error.message : t('workflows.deleteFailed'))
   }
 }
 
 function formatTime(value: number) {
-  return new Intl.DateTimeFormat('zh-CN', {
+  return new Intl.DateTimeFormat(locale.value, {
     dateStyle: 'medium',
     timeStyle: 'short'
   }).format(value)
@@ -338,11 +339,11 @@ function workflowInitial(name: string) {
 
 function workflowKind(workflow: Workflow) {
   const nodes = workflow.parsedNodes || []
-  if (nodes.some(node => /video/i.test(node.nodeType))) return '视频工作流'
-  if (nodes.some(node => /upscale|scale/i.test(node.nodeType))) return '放大修复'
-  if (nodes.some(node => /loadimage|image/i.test(node.nodeType))) return '图像处理'
-  if (nodes.some(node => /ksampler|sampler/i.test(node.nodeType))) return '图像生成'
-  return '通用工作流'
+  if (nodes.some(node => /video/i.test(node.nodeType))) return t('workflows.video')
+  if (nodes.some(node => /upscale|scale/i.test(node.nodeType))) return t('workflows.upscale')
+  if (nodes.some(node => /loadimage|image/i.test(node.nodeType))) return t('workflows.imageProcess')
+  if (nodes.some(node => /ksampler|sampler/i.test(node.nodeType))) return t('workflows.imageGenerate')
+  return t('workflows.generic')
 }
 
 function workflowPurpose(workflow: Workflow) {
@@ -351,17 +352,17 @@ function workflowPurpose(workflow: Workflow) {
   const hasImage = nodes.some(node => /loadimage|image/i.test(node.nodeType))
   const hasSave = nodes.some(node => /saveimage|previewimage|output/i.test(node.nodeType))
   const parts = []
-  if (hasText) parts.push('文本提示词')
-  if (hasImage) parts.push('图片输入')
-  if (hasSave) parts.push('结果输出')
-  return parts.length ? `用于${parts.join('、')}的${workflowKind(workflow)}` : '用于批量提交和执行的 ComfyUI API 工作流'
+  if (hasText) parts.push(t('workflows.textPrompt'))
+  if (hasImage) parts.push(t('workflows.imageInput'))
+  if (hasSave) parts.push(t('workflows.resultOutput'))
+  return parts.length ? t('workflows.purpose', { parts: parts.join(locale.value === 'zh-CN' ? '、' : ', '), kind: workflowKind(workflow) }) : t('workflows.defaultPurpose')
 }
 
 function workflowDescription(workflow: Workflow) {
   const nodeCount = workflow.parsedNodes?.length || 0
   const inputCount = (workflow.parsedNodes || []).reduce((sum, node) => sum + Object.keys(node.inputs || {}).length, 0)
   const size = formatJsonSize(workflow.rawJson)
-  return `${nodeCount} 个节点，约 ${inputCount} 个可解析输入，JSON ${size}。`
+  return t('workflows.description', { nodes: nodeCount, inputs: inputCount, size })
 }
 
 function formatJsonSize(value: Record<string, unknown>) {

@@ -1,7 +1,9 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: GPL-3.0-or-later
 import { randomUUID } from 'node:crypto'
 import { getSqlite } from '../infrastructure/db/sqlite'
 import * as comfyui from '../infrastructure/comfyui/client'
+import { getOnlineProvider } from '../infrastructure/providers/registry'
+import { getProviderRuntimeConfig } from '../infrastructure/providers/settings'
 import type { BackendScheduleMode, BackendScheduleDecision, ModelSignature } from '../../shared/types/app'
 
 export interface BackendRow {
@@ -175,7 +177,22 @@ export function deleteBackend(id: string): boolean {
 export async function testBackendConnection(id: string): Promise<{ ok: boolean; version?: string; error?: string }> {
   const backend = getBackend(id)
   if (!backend) return { ok: false, error: 'Backend not found' }
-  if (backend.type !== 'comfyui') return { ok: false, error: 'Only ComfyUI backends support direct testing' }
+  if (backend.type === 'provider') {
+    const providerId = backend.endpoint.trim() || 'openai'
+    const now = Date.now()
+    try {
+      const provider = getOnlineProvider(providerId)
+      const result = await provider.testConnection(getProviderRuntimeConfig(backend.workspaceId, providerId))
+      getSqlite().prepare('UPDATE backends SET health_status = ?, last_health_check = ?, failure_count = 0, updated_at = ? WHERE id = ?')
+        .run('healthy', now, now, id)
+      return { ok: true, version: result.message }
+    } catch (error) {
+      getSqlite().prepare('UPDATE backends SET health_status = ?, last_health_check = ?, failure_count = failure_count + 1, last_failure_at = ?, updated_at = ? WHERE id = ?')
+        .run('unhealthy', now, now, now, id)
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  }
+  if (backend.type !== 'comfyui') return { ok: false, error: 'Unknown backend type' }
 
   const result = await comfyui.testConnection(backend.endpoint)
   const db = getSqlite()
@@ -331,6 +348,7 @@ export function diffResources(backendIds: string[]): Record<string, Record<strin
 // ============================================
 
 export interface ScheduleInput {
+  backendType?: string
   backendIds?: string[]
   groupId?: string
   requiredResources?: { type: string; name: string }[]
@@ -349,7 +367,7 @@ export function selectBackend(input: ScheduleInput, workspaceId: string): Backen
       .all(input.groupId, workspaceId) as Record<string, unknown>[]
     backends = rows.map(rowToBackend)
   } else {
-    backends = listBackends(workspaceId).filter(b => b.enabled && !b.paused && b.type === 'comfyui')
+    backends = listBackends(workspaceId).filter(b => b.enabled && !b.paused && b.type === (input.backendType || 'comfyui'))
   }
 
   const rejected: Array<{ backendId: string; reason: string }> = []

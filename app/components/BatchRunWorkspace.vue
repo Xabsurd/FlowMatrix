@@ -1,33 +1,33 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <template>
-  <section class="fm-page">
-    <div class="fm-page-header">
+  <section class="fm-page" :class="{ 'is-embedded': embedded }">
+    <div v-if="!embedded" class="fm-page-header">
       <div>
-        <h1 class="fm-page-title">运行</h1>
-        <p class="fm-page-subtitle">文件会先在浏览器暂存；替换和删除只影响待运行队列，点击运行时才提交有效文件。</p>
+        <h1 class="fm-page-title">{{ $t('run.title') }}</h1>
+        <p class="fm-page-subtitle">{{ $t('run.subtitle') }}</p>
       </div>
-      <ElButton class="fm-run-submit-desktop" type="primary" :loading="submitting" @click="startRun">开始运行</ElButton>
+      <ElButton class="fm-run-submit-desktop" type="primary" :loading="submitting" @click="startRun">{{ $t('run.start') }}</ElButton>
     </div>
 
     <div class="fm-run-grid">
       <section class="fm-config-panel fm-card">
         <div class="fm-panel-heading">
-          <span>运行配置</span>
+          <span>{{ $t('run.config') }}</span>
           <ElTag v-if="selectedPreset" size="small" effect="plain">{{ scheduleModeLabel(selectedPreset.scheduleMode) }}</ElTag>
         </div>
 
         <ElForm label-position="top" class="fm-config-form">
-          <ElFormItem label="调用配置">
-            <ElSelect v-model="form.presetId" filterable placeholder="选择调用配置" style="width: 100%">
+          <ElFormItem :label="$t('run.preset')">
+            <ElSelect v-model="form.presetId" filterable :placeholder="$t('run.presetPlaceholder')" style="width: 100%">
               <ElOption v-for="preset in presets" :key="preset.id" :label="preset.name" :value="preset.id" />
             </ElSelect>
           </ElFormItem>
-          <ElFormItem label="任务名称">
-            <ElInput v-model="form.name" placeholder="留空则使用调用配置名称" />
+          <ElFormItem :label="$t('run.taskName')">
+            <ElInput v-model="form.name" :placeholder="$t('run.taskNamePlaceholder')" />
           </ElFormItem>
-          <ElFormItem label="执行实例">
-            <ElSelect v-model="form.backendId" filterable placeholder="自动调度" style="width: 100%">
-              <ElOption label="自动调度" value="" />
+          <ElFormItem :label="$t('run.backend')">
+            <ElSelect v-model="form.backendId" filterable :placeholder="$t('run.autoSchedule')" style="width: 100%">
+              <ElOption :label="$t('run.autoSchedule')" value="" />
               <ElOption
                 v-for="backend in backends"
                 :key="backend.id"
@@ -41,22 +41,22 @@
         <div v-if="selectedPreset" class="fm-config-meta">
           <div class="fm-preset-summary">
             <div>
-              <span>运行输入</span>
+              <span>{{ $t('run.runtimeInputs') }}</span>
               <strong>{{ runtimeParams.length }}</strong>
             </div>
             <div>
-              <span>固定参数</span>
+              <span>{{ $t('run.fixedParams') }}</span>
               <strong>{{ fixedParamCount }}</strong>
             </div>
             <div>
-              <span>预计任务</span>
+              <span>{{ $t('run.estimatedTasks') }}</span>
               <strong>{{ estimatedTaskCount }}</strong>
             </div>
           </div>
 
           <div class="fm-config-note">
             <strong>{{ selectedPreset.name }}</strong>
-            <span>运行会记录本次提交的参数和候选值；结果页可按不同展现形式查看产物。</span>
+            <span>{{ $t('run.configNote') }}</span>
           </div>
         </div>
       </section>
@@ -71,7 +71,7 @@
     </div>
 
     <div class="fm-run-submit-bar">
-      <ElButton type="primary" :loading="submitting" @click="startRun">开始运行</ElButton>
+      <ElButton type="primary" :loading="submitting" @click="startRun">{{ $t('run.start') }}</ElButton>
     </div>
   </section>
 </template>
@@ -79,6 +79,12 @@
 <script setup lang="ts">
 import { ElMessage } from 'element-plus'
 import BatchRuntimeInputs from './BatchRuntimeInputs.vue'
+
+const { t } = useI18n()
+
+const { embedded = false } = defineProps<{
+  embedded?: boolean
+}>()
 
 const COPIED_TASK_STORAGE_KEY = 'flowmatrix.copied-task'
 
@@ -132,7 +138,7 @@ const fixedParamCount = computed(() => selectedPreset.value?.nodeParams.filter(p
 const selectedRuntimeBackendId = computed(() => form.backendId)
 
 watch(runtimeParams, (params) => {
-  estimatedTaskCount.value = params.length ? '待填写' : 1
+  estimatedTaskCount.value = params.length ? t('run.pendingInput') : 1
 })
 
 async function fetchPresets() {
@@ -157,8 +163,8 @@ async function fetchPresets() {
     await nextTick()
     const result = runtimeInputRef.value?.applyCopiedParams(copied.inputParams)
     if (result) {
-      const skipped = result.skippedFiles ? `，${result.skippedFiles} 个文件参数需要重新选择` : ''
-      ElMessage.success(`已复制 ${result.applied} 个参数${skipped}`)
+      const skipped = result.skippedFiles ? t('run.copiedSkippedFiles', { count: result.skippedFiles }) : ''
+      ElMessage.success(t('run.copiedParams', { count: result.applied, skipped }))
     }
   }
 }
@@ -166,7 +172,7 @@ async function fetchPresets() {
 async function startRun() {
   const preset = selectedPreset.value
   if (!preset) {
-    ElMessage.warning('请先选择调用配置')
+    ElMessage.warning(t('run.selectPresetFirst'))
     return
   }
   submitting.value = true
@@ -188,26 +194,26 @@ async function startRun() {
         }
       }
     })
-    ElMessage.success('任务已创建')
+    ElMessage.success(t('run.taskCreated'))
     await navigateTo(`/gallery?batchRunId=${run.id}`)
   } catch (error: unknown) {
-    ElMessage.error(error instanceof Error ? error.message : '创建失败')
+    ElMessage.error(error instanceof Error ? error.message : t('run.createFailed'))
   } finally {
     submitting.value = false
   }
 }
 
 function backendOptionLabel(backend: Backend) {
-  const state = !backend.enabled ? '已禁用' : backend.paused ? '已暂停' : backend.healthStatus || 'unknown'
+  const state = !backend.enabled ? t('run.backendDisabled') : backend.paused ? t('run.backendPaused') : backend.healthStatus || 'unknown'
   return `${backend.name} · ${state}`
 }
 
 function scheduleModeLabel(mode: string) {
   const labels: Record<string, string> = {
-    'idle-first': '空闲优先',
-    'least-queue': '最少队列',
-    'resource-match': '资源匹配',
-    smart: '智能调度'
+    'idle-first': t('run.scheduleIdleFirst'),
+    'least-queue': t('run.scheduleLeastQueue'),
+    'resource-match': t('run.scheduleResourceMatch'),
+    smart: t('run.scheduleSmart')
   }
   return labels[mode] || mode
 }

@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <script setup lang="ts">
 import { appLocales } from '~/config/locales'
 import { appThemes } from '~/config/themes'
@@ -75,7 +75,7 @@ async function saveProviderSettings() {
 
     hasSavedApiKey.value = settings.hasApiKey
     providerForm.apiKey = ''
-    providerStatus.value = '在线 API 配置已保存'
+    providerStatus.value = t('settings.providerSaved')
   } catch (error) {
     providerStatus.value = error instanceof Error ? error.message : String(error)
   } finally {
@@ -164,6 +164,14 @@ onMounted(() => {
     <ElCard shadow="never">
       <template #header>{{ t('providers.title') }}</template>
       <ElForm label-position="top" class="provider-form">
+      <div class="provider-guide">
+        <div>
+          <strong>{{ t('settings.providerGuideTitle') }}</strong>
+          <span>{{ t('settings.providerGuideText') }}</span>
+        </div>
+        <ElButton @click="navigateTo('/backends')">{{ t('settings.addOnlineBackend') }}</ElButton>
+      </div>
+
         <div class="provider-grid">
           <ElFormItem :label="t('providers.baseUrl')">
             <ElInput v-model="providerForm.baseUrl" placeholder="https://api.openai.com/v1" />
@@ -178,7 +186,7 @@ onMounted(() => {
             v-model="providerForm.apiKey"
             type="password"
             show-password
-            :placeholder="hasSavedApiKey ? '已保存密钥；留空则不覆盖' : '保存后用于连接测试和 Worker 执行'"
+            :placeholder="hasSavedApiKey ? t('settings.savedApiKeyPlaceholder') : t('settings.apiKeyPlaceholder')"
           />
         </ElFormItem>
 
@@ -234,6 +242,34 @@ onMounted(() => {
   line-height: 1.45;
 }
 
+.provider-guide {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--fm-primary) 26%, var(--fm-border));
+  border-radius: var(--fm-radius);
+  background: color-mix(in srgb, var(--fm-primary) 8%, var(--fm-panel-muted));
+}
+
+.provider-guide div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.provider-guide strong {
+  color: var(--fm-text);
+  font-size: 14px;
+}
+
+.provider-guide span {
+  color: var(--fm-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
 .provider-form {
   max-width: 920px;
 }
@@ -259,6 +295,7 @@ onMounted(() => {
     grid-template-columns: 1fr;
   }
 
+  .provider-guide,
   .provider-grid {
     grid-template-columns: 1fr;
   }

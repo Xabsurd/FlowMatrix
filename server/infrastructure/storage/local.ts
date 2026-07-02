@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: GPL-3.0-or-later
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 

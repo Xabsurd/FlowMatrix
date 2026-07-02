@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: GPL-3.0-or-later
 import { randomUUID } from 'node:crypto'
 import { getSqlite } from '../infrastructure/db/sqlite'
 
@@ -166,6 +166,13 @@ export function inferParamType(nodeType: string, inputName: string, inputSpec: u
   // Check by node type + input name first for well-known ComfyUI nodes
   const wellKnown = WELL_KNOWN_PARAMS[`${nodeType}.${inputName}`]
   if (wellKnown) return wellKnown
+  const modelResourceType = inferModelResourceType(nodeType, inputName)
+  if (modelResourceType) {
+    return {
+      inferredType: 'MODEL',
+      controlType: modelResourceType === 'lora' ? 'lora-select' : 'select'
+    }
+  }
   if (inputName === 'value' && /^Primitive/i.test(nodeType)) return inferPrimitiveParamType(nodeType)
 
   // Infer from input spec
@@ -194,6 +201,19 @@ export function inferParamType(nodeType: string, inputName: string, inputSpec: u
   return { inferredType: 'STRING', controlType: 'text' }
 }
 
+function inferModelResourceType(nodeType: string, inputName: string) {
+  const lowerNodeType = nodeType.toLowerCase()
+  const lowerInputName = inputName.toLowerCase()
+  if (lowerInputName === 'lora_name') return 'lora'
+  if (/^(ckpt|checkpoint)_?name$/.test(lowerInputName) || /checkpointloader/.test(lowerNodeType)) return 'checkpoint'
+  if (lowerInputName === 'vae_name' || lowerNodeType.includes('vaeloader')) return 'vae'
+  if (lowerInputName === 'unet_name' || lowerInputName === 'diffusion_model_name' || lowerNodeType.includes('unetloader')) return 'unet'
+  if (/^control_?net_?name$/.test(lowerInputName) || lowerNodeType.includes('controlnetloader')) return 'controlnet'
+  if (/^upscale(r)?_?name$/.test(lowerInputName) || lowerNodeType.includes('upscalemodelloader')) return 'upscale'
+  if (lowerInputName === 'embedding_name') return 'embedding'
+  return ''
+}
+
 function inferPrimitiveParamType(nodeType: string) {
   if (/Primitive(Boolean|Bool)/i.test(nodeType)) return { inferredType: 'BOOLEAN', controlType: 'switch' }
   if (/Primitive(Float|Number)/i.test(nodeType)) return { inferredType: 'FLOAT', controlType: 'number' }
@@ -215,6 +235,7 @@ const WELL_KNOWN_PARAMS: Record<string, { inferredType: string; controlType: str
   'LoraLoader.lora_name': { inferredType: 'MODEL', controlType: 'lora-select' },
   'LoraLoader.strength_model': { inferredType: 'FLOAT', controlType: 'slider' },
   'LoraLoader.strength_clip': { inferredType: 'FLOAT', controlType: 'slider' },
+  'LoraLoaderModelOnly.strength_model': { inferredType: 'FLOAT', controlType: 'slider' },
   'CheckpointLoaderSimple.ckpt_name': { inferredType: 'MODEL', controlType: 'select' },
   'VAELoader.vae_name': { inferredType: 'MODEL', controlType: 'select' },
   'UNETLoader.unet_name': { inferredType: 'MODEL', controlType: 'select' }

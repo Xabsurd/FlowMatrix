@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: GPL-3.0-or-later
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto'
 
 const SECRET_FORMAT = 'v1'

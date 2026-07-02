@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: GPL-3.0-or-later
 import { randomUUID } from 'node:crypto'
 import { rmSync } from 'node:fs'
 import { getSqlite } from '../infrastructure/db/sqlite'
@@ -206,6 +206,55 @@ export function createBatchRun(input: {
   return getBatchRun(batchId)!
 }
 
+export function createOnlineProviderBatchRun(input: {
+  workspaceId: string
+  actorId: string
+  name?: string
+  backendId: string
+  providerId?: string
+  mode: 'text-to-image' | 'image-to-image'
+  prompts: string[]
+  imageGroups?: unknown[][]
+  size?: string
+  quality?: string
+  outputFormat?: string
+  n?: number
+  model?: string
+}): BatchRunRow {
+  const db = getSqlite()
+  const batchId = randomUUID()
+  const now = Date.now()
+  const matrix = input.prompts.map((prompt, index) => ({
+    _providerDirect: true,
+    _taskIndex: index,
+    _backendId: input.backendId,
+    _providerId: input.providerId || 'openai',
+    mode: input.mode,
+    prompt,
+    imageInputs: input.imageGroups?.[index] || [],
+    size: input.size || '1024x1024',
+    quality: input.quality || 'auto',
+    outputFormat: input.outputFormat || 'png',
+    n: input.n || 1,
+    model: input.model || undefined
+  }))
+
+  db.prepare(`
+    INSERT INTO batch_runs (id, workspace_id, actor_id, preset_id, workflow_id, name, status, combination_mode, total_tasks, completed_tasks, failed_tasks, canceled_tasks, matrix_json, schedule_mode, created_at, updated_at)
+    VALUES (?, ?, ?, '__online_api__', '__online_api__', ?, 'queued', 'table', ?, 0, 0, 0, ?, 'manual', ?, ?)
+  `).run(batchId, input.workspaceId, input.actorId, input.name ?? null, matrix.length, JSON.stringify(matrix), now, now)
+
+  for (const row of matrix) {
+    const taskId = randomUUID()
+    db.prepare(`
+      INSERT INTO run_tasks (id, batch_run_id, workspace_id, actor_id, workflow_id, preset_id, status, input_params, retry_count, max_retries, created_at, updated_at, timeout_seconds)
+      VALUES (?, ?, ?, ?, '__online_api__', '__online_api__', 'queued', ?, 0, 3, ?, ?, 300)
+    `).run(taskId, batchId, input.workspaceId, input.actorId, JSON.stringify(row), now, now)
+    enqueue(taskId)
+  }
+
+  return getBatchRun(batchId)!
+}
 export function getBatchRun(id: string): BatchRunRow | null {
   const db = getSqlite()
   const row = db.prepare('SELECT * FROM batch_runs WHERE id = ?').get(id) as Record<string, unknown> | undefined

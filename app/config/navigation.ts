@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: GPL-3.0-or-later
 export const navigationItems = [
   { to: '/', key: 'nav.home', icon: 'home' },
   { to: '/runs', key: 'nav.run', icon: 'play' },

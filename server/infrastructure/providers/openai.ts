@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
-import OpenAI from 'openai'
+// SPDX-License-Identifier: GPL-3.0-or-later
+import OpenAI, { toFile } from 'openai'
 import { createError } from 'h3'
 import type {
   GenerateImageInput,
@@ -59,14 +59,25 @@ export const openaiProviderAdapter: OnlineProviderAdapter = {
 
     const client = createClient(config)
     const model = input.model || config.model
-    const response = await client.images.generate({
-      model,
-      prompt: input.prompt,
-      n: input.n || 1,
-      size: input.size || '1024x1024',
-      quality: input.quality || 'auto',
-      output_format: input.outputFormat || 'png'
-    } as Parameters<typeof client.images.generate>[0])
+    const imageInputs = input.imageInputs || []
+    const response = imageInputs.length
+      ? await client.images.edit({
+          model,
+          image: await Promise.all(imageInputs.map(image => toFile(image.data, image.fileName, { type: image.mimeType }))),
+          prompt: input.prompt,
+          n: input.n || 1,
+          size: input.size || '1024x1024',
+          quality: input.quality || 'auto',
+          output_format: input.outputFormat || 'png'
+        } as Parameters<typeof client.images.edit>[0])
+      : await client.images.generate({
+          model,
+          prompt: input.prompt,
+          n: input.n || 1,
+          size: input.size || '1024x1024',
+          quality: input.quality || 'auto',
+          output_format: input.outputFormat || 'png'
+        } as Parameters<typeof client.images.generate>[0])
     const images = 'data' in response && Array.isArray(response.data) ? response.data : []
 
     return {

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: GPL-3.0-or-later
 import { createBatchRun, generateMatrix } from '../../../domain/batch'
 import { getBackend } from '../../../domain/backends'
 import { getRequestContext } from '../../../domain/context'
@@ -15,7 +15,7 @@ export default defineEventHandler(async (event) => {
   const requestedBackendId = body.backendId ? String(body.backendId) : ''
   if (requestedBackendId) {
     const backend = getBackend(requestedBackendId)
-    if (!backend || backend.workspaceId !== ctx.workspaceId || backend.type !== 'comfyui') {
+    if (!backend || backend.workspaceId !== ctx.workspaceId || !['comfyui', 'provider'].includes(backend.type)) {
       throw createError({ statusCode: 400, message: '指定的执行后端不存在' })
     }
     if (!backend.enabled || backend.paused) {

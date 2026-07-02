@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: GPL-3.0-or-later
 import { integer, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
 
 const timestamp = (name: string) => integer(name, { mode: 'timestamp_ms' })

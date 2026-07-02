@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <script setup lang="ts">
 import { Icon } from '@iconify/vue'
 import arrowLeftIcon from '@iconify-icons/lucide/arrow-left'

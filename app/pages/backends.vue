@@ -1,12 +1,12 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <template>
   <section class="fm-page">
     <div class="fm-page-header">
       <div>
-        <h1 class="fm-page-title">执行后端</h1>
-        <p class="fm-page-subtitle">管理 ComfyUI 执行后端。支持连接测试、资源同步和多后端调度。</p>
+        <h1 class="fm-page-title">{{ t('backends.title') }}</h1>
+        <p class="fm-page-subtitle">{{ t('backends.subtitle') }}</p>
       </div>
-      <ElButton type="primary" @click="showAddDialog = true">添加后端</ElButton>
+      <ElButton type="primary" @click="showAddDialog = true">{{ t('backends.add') }}</ElButton>
     </div>
 
     <div class="fm-card-grid">
@@ -22,22 +22,22 @@
             </ElButton>
             <template #dropdown>
               <ElDropdownMenu>
-                <ElDropdownItem @click="testBackend(backend.id)">测试连接</ElDropdownItem>
-                <ElDropdownItem @click="refreshResources(backend.id)">同步资源</ElDropdownItem>
-                <ElDropdownItem divided @click="removeBackend(backend.id)">删除</ElDropdownItem>
+                <ElDropdownItem @click="testBackend(backend.id)">{{ t('backends.testConnection') }}</ElDropdownItem>
+                <ElDropdownItem :disabled="backend.type !== 'comfyui'" @click="refreshResources(backend.id)">{{ t('backends.syncResources') }}</ElDropdownItem>
+                <ElDropdownItem divided @click="removeBackend(backend.id)">{{ t('common.delete') }}</ElDropdownItem>
               </ElDropdownMenu>
             </template>
           </ElDropdown>
         </div>
         <div class="fm-card-body">
-          <div class="fm-meta-row"><span class="fm-label">端点</span><span class="fm-value">{{ backend.endpoint }}</span></div>
-          <div class="fm-meta-row"><span class="fm-label">类型</span><span class="fm-value">{{ backend.type }}</span></div>
+          <div class="fm-meta-row"><span class="fm-label">{{ t('backends.endpoint') }}</span><span class="fm-value">{{ backend.endpoint }}</span></div>
+          <div class="fm-meta-row"><span class="fm-label">{{ t('backends.type') }}</span><span class="fm-value">{{ backend.type }}</span></div>
           <div class="fm-meta-row">
-            <span class="fm-label">状态</span>
+            <span class="fm-label">{{ t('backends.status') }}</span>
             <ElTag :type="statusTagType(backend.healthStatus)" size="small">{{ backend.healthStatus }}</ElTag>
           </div>
           <div class="fm-meta-row">
-            <span class="fm-label">负载</span>
+            <span class="fm-label">{{ t('backends.load') }}</span>
             <span class="fm-value">{{ backend.currentLoad }} / {{ backend.maxConcurrency }}</span>
           </div>
           <div v-if="backend.tags?.length" class="fm-tags">
@@ -47,34 +47,41 @@
       </div>
     </div>
 
-    <ElEmpty v-if="!backends.length && !loading" description="暂无执行后端，点击「添加后端」开始配置。" />
+    <ElEmpty v-if="!backends.length && !loading" :description="t('backends.empty')" />
 
-    <ElDialog v-model="showAddDialog" title="添加执行后端" width="500px">
+    <ElDialog v-model="showAddDialog" :title="t('backends.addDialog')" width="500px">
       <ElForm :model="form" label-width="100px">
-        <ElFormItem label="名称" required>
+        <ElFormItem :label="t('backends.name')" required>
           <ElInput v-model="form.name" placeholder="My ComfyUI Server" />
         </ElFormItem>
-        <ElFormItem label="端点" required>
-          <ElInput v-model.trim="form.endpoint" placeholder="http://127.0.0.1:8188" />
+        <ElFormItem :label="t('backends.endpoint')" required>
+          <ElInput v-model.trim="form.endpoint" :placeholder="form.type === 'provider' ? 'openai' : 'http://127.0.0.1:8188'" />
         </ElFormItem>
-        <ElFormItem label="类型">
+        <ElFormItem :label="t('backends.type')">
           <ElSelect v-model="form.type" style="width: 100%">
             <ElOption label="ComfyUI" value="comfyui" />
+            <ElOption :label="t('providers.title')" value="provider" />
           </ElSelect>
         </ElFormItem>
-        <ElFormItem label="最大并发">
+        <ElFormItem :label="t('backends.maxConcurrency')">
           <ElInputNumber v-model="form.maxConcurrency" :min="1" :max="16" />
         </ElFormItem>
-        <ElFormItem label="权重">
+        <ElFormItem :label="t('backends.weight')">
           <ElInputNumber v-model="form.weight" :min="0.1" :max="10" :step="0.1" />
         </ElFormItem>
-        <ElFormItem label="标签">
-          <ElInput v-model="form.tagsStr" placeholder="gpu,4090 (逗号分隔)" />
+        <ElAlert
+          v-if="form.type === 'provider'"
+          class="fm-provider-hint"
+          :title="t('backends.providerHint')"
+          type="info"
+          :closable="false" />
+        <ElFormItem :label="t('backends.tags')">
+          <ElInput v-model="form.tagsStr" :placeholder="t('backends.tagsPlaceholder')" />
         </ElFormItem>
       </ElForm>
       <template #footer>
-        <ElButton @click="showAddDialog = false">取消</ElButton>
-        <ElButton type="primary" :loading="saving" @click="addBackend">添加</ElButton>
+        <ElButton @click="showAddDialog = false">{{ t('common.cancel') }}</ElButton>
+        <ElButton type="primary" :loading="saving" @click="addBackend">{{ t('backends.add') }}</ElButton>
       </template>
     </ElDialog>
   </section>
@@ -96,6 +103,7 @@ interface Backend {
   tags: string[]
 }
 
+const { t } = useI18n()
 const backends = ref<Backend[]>([])
 const loading = ref(false)
 const showAddDialog = ref(false)
@@ -109,6 +117,10 @@ const form = reactive({
   tagsStr: ''
 })
 
+watch(() => form.type, (type) => {
+  if (type === 'provider' && form.endpoint.startsWith('http')) form.endpoint = 'openai'
+  if (type === 'comfyui' && !form.endpoint.startsWith('http')) form.endpoint = 'http://127.0.0.1:8188'
+})
 async function fetchBackends() {
   loading.value = true
   try {
@@ -121,7 +133,7 @@ async function fetchBackends() {
 async function addBackend() {
   const endpoint = form.endpoint.trim()
   if (!form.name || !endpoint) {
-    ElMessage.warning('请填写名称和端点')
+    ElMessage.warning(t('backends.fillNameEndpoint'))
     return
   }
   saving.value = true
@@ -139,50 +151,54 @@ async function addBackend() {
     })
     showAddDialog.value = false
     form.name = ''
-    form.endpoint = 'http://127.0.0.1:8188'
+    form.endpoint = form.type === 'provider' ? 'openai' : 'http://127.0.0.1:8188'
     form.tagsStr = ''
     await fetchBackends()
-    ElMessage.success('后端已添加')
+    ElMessage.success(t('backends.added'))
   } catch (e: unknown) {
-    ElMessage.error(e instanceof Error ? e.message : '添加失败')
+    ElMessage.error(e instanceof Error ? e.message : t('backends.addFailed'))
   } finally {
     saving.value = false
   }
 }
 
 async function testBackend(id: string) {
-  ElMessage.info('正在测试连接...')
+  ElMessage.info(t('backends.testing'))
   try {
     const result = await $fetch<{ ok: boolean; version?: string; error?: string }>(`/api/v1/backends/${id}/test`, { method: 'POST' })
     if (result.ok) {
-      ElMessage.success(`连接成功${result.version ? ` (v${result.version})` : ''}`)
+      ElMessage.success(t('backends.testSucceeded', { version: result.version ? ' (v' + result.version + ')' : '' }))
     } else {
-      ElMessage.error(`连接失败: ${result.error}`)
+      ElMessage.error(t('backends.testFailed', { error: result.error }))
     }
     await fetchBackends()
   } catch (e: unknown) {
-    ElMessage.error(e instanceof Error ? e.message : '测试失败')
+    ElMessage.error(e instanceof Error ? e.message : t('backends.testError'))
   }
 }
 
 async function refreshResources(id: string) {
-  ElMessage.info('正在同步资源...')
+  if (backends.value.find(backend => backend.id === id)?.type !== 'comfyui') {
+    ElMessage.info(t('backends.providerNoResources'))
+    return
+  }
+  ElMessage.info(t('backends.syncing'))
   try {
     const result = await $fetch<{ synced: number; errors: string[] }>(`/api/v1/backends/${id}/resources/refresh`, { method: 'POST' })
-    ElMessage.success(`已同步 ${result.synced} 个资源${result.errors.length ? `，${result.errors.length} 个错误` : ''}`)
+    ElMessage.success(t('backends.synced', { count: result.synced, errors: result.errors.length ? t('backends.syncErrors', { count: result.errors.length }) : '' }))
   } catch (e: unknown) {
-    ElMessage.error(e instanceof Error ? e.message : '同步失败')
+    ElMessage.error(e instanceof Error ? e.message : t('backends.syncFailed'))
   }
 }
 
 async function removeBackend(id: string) {
-  await ElMessageBox.confirm('确定删除该后端？关联的资源和健康记录也会被删除。', '确认删除', { type: 'warning' })
+  await ElMessageBox.confirm(t('backends.deleteConfirm'), t('backends.deleteTitle'), { type: 'warning' })
   try {
     await $fetch(`/api/v1/backends/${id}`, { method: 'DELETE' })
     await fetchBackends()
-    ElMessage.success('已删除')
+    ElMessage.success(t('backends.deleted'))
   } catch (e: unknown) {
-    ElMessage.error(e instanceof Error ? e.message : '删除失败')
+    ElMessage.error(e instanceof Error ? e.message : t('backends.deleteFailed'))
   }
 }
 
@@ -211,4 +227,5 @@ onMounted(fetchBackends)
 .fm-status-dot.healthy { background: var(--fm-success); }
 .fm-status-dot.unhealthy { background: var(--fm-danger); }
 .fm-status-dot.maintenance { background: var(--fm-warning); }
+.fm-provider-hint { margin-bottom: 14px; }
 </style>

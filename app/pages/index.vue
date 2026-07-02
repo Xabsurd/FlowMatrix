@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <script setup lang="ts">
 const { t } = useI18n()
 const { data: health } = await useFetch('/api/health')
@@ -31,18 +31,48 @@ const successRate = computed(() => {
 })
 
 const taskSegments = computed(() => [
-  { key: 'queued', label: '排队', value: stats.value.taskStatuses.queued, color: 'var(--fm-warning)' },
-  { key: 'running', label: '运行', value: stats.value.taskStatuses.running, color: 'var(--fm-primary)' },
-  { key: 'succeeded', label: '成功', value: stats.value.taskStatuses.succeeded, color: 'var(--fm-success)' },
-  { key: 'failed', label: '失败', value: stats.value.taskStatuses.failed, color: 'var(--fm-danger)' },
-  { key: 'canceled', label: '取消', value: stats.value.taskStatuses.canceled, color: 'var(--fm-muted)' }
+  { key: 'queued', label: t('dashboard.statusQueued'), value: stats.value.taskStatuses.queued, color: 'var(--fm-warning)' },
+  { key: 'running', label: t('dashboard.statusRunning'), value: stats.value.taskStatuses.running, color: 'var(--fm-primary)' },
+  { key: 'succeeded', label: t('dashboard.statusSucceeded'), value: stats.value.taskStatuses.succeeded, color: 'var(--fm-success)' },
+  { key: 'failed', label: t('dashboard.statusFailed'), value: stats.value.taskStatuses.failed, color: 'var(--fm-danger)' },
+  { key: 'canceled', label: t('dashboard.statusCanceled'), value: stats.value.taskStatuses.canceled, color: 'var(--fm-muted)' }
 ])
 
+const guideSteps = computed(() => [
+  {
+    title: t('dashboard.step1Title'),
+    detail: stats.value.backends > 0 ? t('dashboard.step1Done', { count: stats.value.backends }) : t('dashboard.step1Todo'),
+    done: stats.value.backends > 0,
+    action: t('nav.backends'),
+    to: '/backends'
+  },
+  {
+    title: t('dashboard.step2Title'),
+    detail: stats.value.workflows > 0 ? t('dashboard.step2Done', { count: stats.value.workflows }) : t('dashboard.step2Todo'),
+    done: stats.value.workflows > 0,
+    action: t('nav.workflows'),
+    to: '/workflows'
+  },
+  {
+    title: t('dashboard.step3Title'),
+    detail: stats.value.presets > 0 ? t('dashboard.step3Done', { count: stats.value.presets }) : t('dashboard.step3Todo'),
+    done: stats.value.presets > 0,
+    action: t('nav.presets'),
+    to: '/presets'
+  },
+  {
+    title: t('dashboard.step4Title'),
+    detail: stats.value.results > 0 ? t('dashboard.step4Done', { count: stats.value.results }) : t('dashboard.step4Todo'),
+    done: stats.value.results > 0,
+    action: t('run.start'),
+    to: '/runs'
+  }
+])
 const quickStats = computed(() => [
-  { label: '执行后端', value: stats.value.backends, detail: `${stats.value.healthyBackends} 可用` },
-  { label: '工作流', value: stats.value.workflows, detail: '已导入' },
-  { label: '调用配置', value: stats.value.presets, detail: '可复用预设' },
-  { label: '结果', value: stats.value.results, detail: formatBytes(stats.value.storageBytes) }
+  { label: t('nav.backends'), value: stats.value.backends, detail: t('dashboard.available', { count: stats.value.healthyBackends }) },
+  { label: t('nav.workflows'), value: stats.value.workflows, detail: t('dashboard.imported') },
+  { label: t('nav.presets'), value: stats.value.presets, detail: t('dashboard.reusable') },
+  { label: t('nav.result'), value: stats.value.results, detail: formatBytes(stats.value.storageBytes) }
 ])
 
 const setupProgress = computed(() => {
@@ -77,18 +107,35 @@ function formatBytes(value: number) {
       </div>
     </div>
 
+    <section class="guide-panel fm-panel">
+      <div class="guide-copy">
+        <span>{{ t('dashboard.quickStart') }}</span>
+        <h2>{{ t('dashboard.guideTitle') }}</h2>
+        <p>{{ t('dashboard.guideSubtitle') }}</p>
+      </div>
+      <div class="guide-steps">
+        <NuxtLink v-for="step in guideSteps" :key="step.title" :to="step.to" class="guide-step" :class="{ done: step.done }">
+          <span class="guide-check">{{ step.done ? 'OK' : step.title.slice(0, 1) }}</span>
+          <div>
+            <strong>{{ step.title }}</strong>
+            <small>{{ step.detail }}</small>
+          </div>
+          <em>{{ step.action }}</em>
+        </NuxtLink>
+      </div>
+    </section>
     <div class="hero-grid">
       <ElCard class="overview-card queue-card" shadow="never">
-        <template #header>运行概览</template>
+        <template #header>{{ t('dashboard.overview') }}</template>
         <div class="queue-main">
           <div class="queue-number">{{ activeTasks }}</div>
           <div>
-            <div class="queue-label">活跃任务</div>
-            <div class="queue-subtitle">{{ stats.queuePending }} 排队 · {{ stats.queueClaimed }} 已领取</div>
+            <div class="queue-label">{{ t('dashboard.activeTasks') }}</div>
+            <div class="queue-subtitle">{{ t('dashboard.queueSubtitle', { pending: stats.queuePending, claimed: stats.queueClaimed }) }}</div>
           </div>
         </div>
 
-        <div class="status-bar" aria-label="任务状态分布">
+        <div class="status-bar" :aria-label="t('dashboard.statusDistribution')">
           <span
             v-for="segment in taskSegments"
             :key="segment.key"
@@ -107,14 +154,14 @@ function formatBytes(value: number) {
       </ElCard>
 
       <ElCard class="overview-card ring-card" shadow="never">
-        <template #header>完成质量</template>
+        <template #header>{{ t('dashboard.quality') }}</template>
         <div class="ring-wrap">
           <div class="ring" :style="{ '--ring-value': `${successRate}%` }">
             <span>{{ successRate }}%</span>
           </div>
           <div class="ring-meta">
-            <div class="ring-title">成功率</div>
-            <div class="ring-copy">{{ completedTasks }} 个已结束任务</div>
+            <div class="ring-title">{{ t('dashboard.successRate') }}</div>
+            <div class="ring-copy">{{ t('dashboard.completedTasks', { count: completedTasks }) }}</div>
           </div>
         </div>
       </ElCard>
@@ -130,36 +177,36 @@ function formatBytes(value: number) {
 
     <div class="home-grid">
       <ElCard class="overview-card" shadow="never">
-        <template #header>系统状态</template>
+        <template #header>{{ t('dashboard.systemStatus') }}</template>
         <div class="system-list">
           <div class="system-row">
             <span>Web</span>
             <strong>OK</strong>
           </div>
           <div class="system-row">
-            <span>数据库</span>
+            <span>{{ t('dashboard.database') }}</span>
             <strong>{{ health?.database }}</strong>
           </div>
           <div class="system-row">
-            <span>队列</span>
+            <span>{{ t('dashboard.queue') }}</span>
             <strong>{{ health?.queue }}</strong>
           </div>
           <div class="system-row">
-            <span>模式</span>
+            <span>{{ t('dashboard.mode') }}</span>
             <strong>{{ health?.mode }}</strong>
           </div>
         </div>
       </ElCard>
 
       <ElCard class="overview-card" shadow="never">
-        <template #header>配置完成度</template>
+        <template #header>{{ t('dashboard.setupProgress') }}</template>
         <div class="setup-block">
           <ElProgress :percentage="setupProgress" :stroke-width="12" :show-text="false" />
           <div class="setup-percent">{{ setupProgress }}%</div>
           <div class="setup-actions">
-            <ElButton @click="navigateTo('/backends')">执行后端</ElButton>
-            <ElButton @click="navigateTo('/workflows')">工作流</ElButton>
-            <ElButton type="primary" @click="navigateTo('/settings')">设置</ElButton>
+            <ElButton @click="navigateTo('/backends')">{{ t('nav.backends') }}</ElButton>
+            <ElButton @click="navigateTo('/workflows')">{{ t('nav.workflows') }}</ElButton>
+            <ElButton type="primary" @click="navigateTo('/settings')">{{ t('nav.settings') }}</ElButton>
           </div>
         </div>
       </ElCard>
@@ -172,6 +219,90 @@ function formatBytes(value: number) {
   gap: 16px;
 }
 
+.guide-panel {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.72fr) minmax(0, 1.28fr);
+  gap: 18px;
+  padding: 18px;
+}
+
+.guide-copy {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.guide-copy span,
+.guide-step small,
+.guide-step em {
+  color: var(--fm-muted);
+  font-size: 12px;
+}
+
+.guide-copy h2 {
+  margin: 0;
+  color: var(--fm-text);
+  font-size: 20px;
+}
+
+.guide-copy p {
+  margin: 0;
+  color: var(--fm-muted);
+  line-height: 1.6;
+}
+
+.guide-steps {
+  display: grid;
+  gap: 8px;
+}
+
+.guide-step {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--fm-border);
+  border-radius: var(--fm-radius);
+  background: color-mix(in srgb, var(--fm-panel-muted) 66%, transparent);
+  color: var(--fm-text);
+}
+
+.guide-step:hover {
+  border-color: color-mix(in srgb, var(--fm-primary) 36%, var(--fm-border));
+  background: color-mix(in srgb, var(--fm-primary) 9%, var(--fm-panel-muted));
+}
+
+.guide-step div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.guide-step strong,
+.guide-step small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.guide-check {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--fm-border);
+  border-radius: 999px;
+  color: var(--fm-text);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.guide-step.done .guide-check {
+  border-color: color-mix(in srgb, var(--fm-success) 58%, var(--fm-border));
+  background: color-mix(in srgb, var(--fm-success) 16%, transparent);
+}
 .hero-grid,
 .home-grid {
   display: grid;
@@ -340,6 +471,7 @@ function formatBytes(value: number) {
 }
 
 @media (max-width: 980px) {
+  .guide-panel,
   .hero-grid,
   .home-grid,
   .metric-grid {

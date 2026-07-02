@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <script setup lang="ts">
 import { ElMessage } from 'element-plus'
 import type { BatchDetail, ResultFile, Task } from '~/types/gallery'
@@ -24,6 +24,7 @@ import {
 } from '~/utils/gallery'
 
 const route = useRoute()
+const { t, locale } = useI18n()
 const { rowActionSize } = useUiPreferences()
 
 const batchId = computed(() => String(route.params.id || ''))
@@ -51,7 +52,7 @@ async function fetchDetail() {
     })
     detail.value = await $fetch<BatchDetail>(`/api/v1/batch/${batchId.value}?${params}`)
   } catch (error: unknown) {
-    ElMessage.error(error instanceof Error ? error.message : '获取详情失败')
+    ElMessage.error(error instanceof Error ? error.message : t('gallery.fetchDetailFailed'))
   } finally {
     loading.value = false
   }
@@ -63,7 +64,7 @@ function copyTaskToRun(task: Task) {
     presetId: task.presetId,
     inputParams: Object.fromEntries(visibleInputParams(task.inputParams))
   }))
-  ElMessage.success('已复制任务参数，正在返回运行页')
+  ElMessage.success(t('gallery.copiedTaskBack'))
   void navigateTo(`/runs?presetId=${task.presetId}`)
 }
 
@@ -117,34 +118,34 @@ onMounted(fetchDetail)
   <section class="fm-page">
     <div class="fm-page-header">
       <div>
-        <h1 class="fm-page-title">运行详情</h1>
-        <p class="fm-page-subtitle">当前批次的执行进度、任务参数和运行摘要。</p>
+        <h1 class="fm-page-title">{{ t('gallery.detailTitle') }}</h1>
+        <p class="fm-page-subtitle">{{ t('gallery.detailSubtitle') }}</p>
       </div>
       <div class="actions">
         <ElButton @click="backToQueue">
           <FmIcon name="arrowLeft" :size="16" />
-          返回列表
+          {{ t('gallery.backToList') }}
         </ElButton>
-        <ElButton @click="openResults">结果</ElButton>
-        <ElButton :loading="loading" type="primary" @click="fetchDetail">刷新详情</ElButton>
+        <ElButton @click="openResults">{{ t('gallery.result') }}</ElButton>
+        <ElButton :loading="loading" type="primary" @click="fetchDetail">{{ t('gallery.refreshDetail') }}</ElButton>
       </div>
     </div>
 
     <section v-loading="loading" class="fm-stack">
-      <ElEmpty v-if="!detail" description="正在读取运行详情。" />
+      <ElEmpty v-if="!detail" :description="t('gallery.readingDetail')" />
 
       <template v-else>
         <div class="detail-header fm-card">
           <div>
-            <h2>{{ batchTitle(detail) }}</h2>
-            <span>{{ batchSubtitle(detail) }}</span>
+            <h2>{{ batchTitle(detail, t, locale) }}</h2>
+            <span>{{ batchSubtitle(detail, t, locale) }}</span>
           </div>
-          <ElTag :type="statusType(detail.status)" effect="light">{{ statusLabel(detail.status) }}</ElTag>
+          <ElTag :type="statusType(detail.status)" effect="light">{{ statusLabel(detail.status, t) }}</ElTag>
         </div>
 
         <div class="detail-grid">
           <div class="fm-card progress-card">
-            <h3>执行进度</h3>
+            <h3>{{ t('gallery.progress') }}</h3>
             <div class="progress-layout">
               <ElProgress
                 type="circle"
@@ -152,22 +153,22 @@ onMounted(fetchDetail)
                 :status="detail.status === 'failed' ? 'exception' : detail.status === 'completed' ? 'success' : undefined"
                 :width="112" />
               <div class="progress-details">
-                <div class="stat-item"><span class="dot queued" /><span>排队中</span><strong>{{ queuedCount(detail) }}</strong></div>
-                <div class="stat-item"><span class="dot running" /><span>运行中</span><strong>{{ runningCount(detail) }}</strong></div>
-                <div class="stat-item"><span class="dot succeeded" /><span>成功</span><strong>{{ succeededCount(detail) }}</strong></div>
-                <div class="stat-item"><span class="dot failed" /><span>失败</span><strong>{{ failedCount(detail) }}</strong></div>
-                <div class="stat-item"><span class="dot canceled" /><span>已取消</span><strong>{{ canceledCount(detail) }}</strong></div>
+                <div class="stat-item"><span class="dot queued" /><span>{{ t('gallery.statusQueued') }}</span><strong>{{ queuedCount(detail) }}</strong></div>
+                <div class="stat-item"><span class="dot running" /><span>{{ t('gallery.statusRunning') }}</span><strong>{{ runningCount(detail) }}</strong></div>
+                <div class="stat-item"><span class="dot succeeded" /><span>{{ t('gallery.statusSucceeded') }}</span><strong>{{ succeededCount(detail) }}</strong></div>
+                <div class="stat-item"><span class="dot failed" /><span>{{ t('gallery.statusFailed') }}</span><strong>{{ failedCount(detail) }}</strong></div>
+                <div class="stat-item"><span class="dot canceled" /><span>{{ t('gallery.statusCanceled') }}</span><strong>{{ canceledCount(detail) }}</strong></div>
               </div>
             </div>
           </div>
 
           <div class="fm-card summary-card">
-            <h3>运行摘要</h3>
+            <h3>{{ t('gallery.summary') }}</h3>
             <div class="summary-list">
-              <div><span>组合模式</span><strong>{{ modeLabel(detail.combinationMode) }}</strong></div>
-              <div><span>生成文件</span><strong>{{ detail.resultStats.activeCount }} 个 / {{ formatSize(detail.resultStats.totalSize) }}</strong></div>
-              <div><span>工作流</span><strong class="mono">{{ detail.workflowId }}</strong></div>
-              <div><span>调用配置</span><strong class="mono">{{ detail.presetId }}</strong></div>
+              <div><span>{{ t('gallery.combinationMode') }}</span><strong>{{ modeLabel(detail.combinationMode, t) }}</strong></div>
+              <div><span>{{ t('gallery.generatedFiles') }}</span><strong>{{ t('gallery.generatedFilesValue', { count: detail.resultStats.activeCount, size: formatSize(detail.resultStats.totalSize) }) }}</strong></div>
+              <div><span>{{ t('gallery.workflow') }}</span><strong class="mono">{{ detail.workflowId }}</strong></div>
+              <div><span>{{ t('gallery.preset') }}</span><strong class="mono">{{ detail.presetId }}</strong></div>
             </div>
           </div>
         </div>
@@ -175,8 +176,8 @@ onMounted(fetchDetail)
         <div class="tasks-panel fm-card">
           <div class="fm-section-head">
             <div>
-              <h2>队列任务</h2>
-              <span>第 {{ detail.taskPage.offset + 1 }} - {{ Math.min(detail.taskPage.offset + detail.tasks.length, detail.taskPage.total) }} 个，共 {{ detail.taskPage.total }} 个任务</span>
+              <h2>{{ t('gallery.tasks') }}</h2>
+              <span>{{ t('gallery.taskRange', { from: detail.taskPage.offset + 1, to: Math.min(detail.taskPage.offset + detail.tasks.length, detail.taskPage.total), total: detail.taskPage.total }) }}</span>
             </div>
           </div>
 
@@ -184,30 +185,30 @@ onMounted(fetchDetail)
             <article v-for="(task, index) in detail.tasks" :key="task.id" class="task-row" :class="{ expanded: isTaskExpanded(task.id) }">
               <button class="task-summary" type="button" @click="toggleTask(task.id)">
                 <span class="task-index mono">#{{ detail.taskPage.offset + index + 1 }}</span>
-                <span class="task-param" :title="taskParamSummary(task)">{{ taskParamSummary(task) }}</span>
-                <ElTag :type="statusType(task.status)" size="small" effect="light">{{ statusLabel(task.status) }}</ElTag>
+                <span class="task-param" :title="taskParamSummary(task, t)">{{ taskParamSummary(task, t) }}</span>
+                <ElTag :type="statusType(task.status)" size="small" effect="light">{{ statusLabel(task.status, t) }}</ElTag>
                 <span class="task-meta">
                   <span>{{ task.backendId ? task.backendId.slice(0, 8) : '-' }}</span>
                   <span>{{ formatDuration(task) }}</span>
-                  <span>{{ getTaskResults(task.id).length }} 个结果</span>
+                  <span>{{ t('gallery.resultCount', { count: getTaskResults(task.id).length }) }}</span>
                 </span>
-                <ElButton :size="rowActionSize" @click.stop="copyTaskToRun(task)">复制</ElButton>
+                <ElButton :size="rowActionSize" @click.stop="copyTaskToRun(task)">{{ t('gallery.copy') }}</ElButton>
                 <FmIcon :name="isTaskExpanded(task.id) ? 'chevronUp' : 'chevronDown'" />
               </button>
 
               <div v-if="isTaskExpanded(task.id)" class="task-detail">
                 <section>
-                  <h4>运行参数</h4>
+                  <h4>{{ t('gallery.runtimeParams') }}</h4>
                   <div class="params-column">
                     <div v-for="[k, v] in visibleInputParams(task.inputParams)" :key="k" class="param-badge">
                       <span class="p-key">{{ k.split('.').pop() }}</span>
-                      <span class="p-val" :title="String(v)">{{ typeof v === 'object' ? '文件/资源' : String(v) }}</span>
+                      <span class="p-val" :title="String(v)">{{ typeof v === 'object' ? t('gallery.fileResource') : String(v) }}</span>
                     </div>
                   </div>
                 </section>
 
                 <section>
-                  <h4>结果 / 错误</h4>
+                  <h4>{{ t('gallery.resultOrError') }}</h4>
                   <div v-if="task.status === 'succeeded' && getTaskResults(task.id).length" class="outputs-list">
                     <button v-for="res in getTaskResults(task.id)" :key="res.id" class="thumbnail-wrapper" type="button" @click="showLightbox(res)">
                       <img v-if="isImageResult(res)" :src="resultUrl(res)" class="thumbnail-img" >
@@ -215,9 +216,9 @@ onMounted(fetchDetail)
                     </button>
                   </div>
                   <div v-else-if="task.status === 'failed'" class="error-wrapper">
-                    <span class="error-msg" :title="task.errorMessage || ''">{{ task.errorMessage || '未知执行错误' }}</span>
+                    <span class="error-msg" :title="task.errorMessage || ''">{{ task.errorMessage || t('gallery.unknownError') }}</span>
                   </div>
-                  <span v-else class="text-muted">暂无输出</span>
+                  <span v-else class="text-muted">{{ t('gallery.noOutput') }}</span>
                 </section>
               </div>
             </article>
@@ -537,3 +538,4 @@ onMounted(fetchDetail)
   }
 }
 </style>
+

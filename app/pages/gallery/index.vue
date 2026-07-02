@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <script setup lang="ts">
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { BatchDetail, BatchRun, Task } from '~/types/gallery'
@@ -14,6 +14,7 @@ import {
 } from '~/utils/gallery'
 
 const route = useRoute()
+const { t, locale } = useI18n()
 const { rowActionSize } = useUiPreferences()
 
 const batchRuns = ref<BatchRun[]>([])
@@ -32,7 +33,7 @@ async function fetchBatchRuns(quiet = false) {
     const offset = (page.value - 1) * limit
     batchRuns.value = await $fetch<BatchRun[]>(`/api/v1/batch?limit=${limit}&offset=${offset}`)
   } catch (error: unknown) {
-    ElMessage.error(error instanceof Error ? error.message : '获取运行队列失败')
+    ElMessage.error(error instanceof Error ? error.message : t('gallery.fetchQueueFailed'))
   } finally {
     if (!quiet) loading.value = false
   }
@@ -72,7 +73,7 @@ async function copyBatchFirstTask(batch: BatchRun) {
   try {
     const tasks = await fetchAllTasks(batch.id)
     if (!tasks.length) {
-      ElMessage.warning('这个批次没有可复制的任务')
+      ElMessage.warning(t('gallery.noCopyableTask'))
       return
     }
     // Collect all unique values per parameter across all tasks
@@ -92,10 +93,10 @@ async function copyBatchFirstTask(batch: BatchRun) {
       presetId,
       inputParams: allInputParams
     }))
-    ElMessage.success(`已复制 ${Object.keys(allInputParams).length} 个参数，正在返回运行页`)
+    ElMessage.success(t('gallery.copiedParamsBack', { count: Object.keys(allInputParams).length }))
     void navigateTo(`/runs?presetId=${presetId}`)
   } catch (error: unknown) {
-    ElMessage.error(error instanceof Error ? error.message : '复制任务失败')
+    ElMessage.error(error instanceof Error ? error.message : t('gallery.copyFailed'))
   } finally {
     copyingBatchId.value = ''
   }
@@ -103,19 +104,19 @@ async function copyBatchFirstTask(batch: BatchRun) {
 
 async function deleteBatchRun(batch: BatchRun) {
   if (batch.status === 'queued' || batch.status === 'running') {
-    ElMessage.warning('请先取消运行中的队列，再删除')
+    ElMessage.warning(t('gallery.cancelBeforeDelete'))
     return
   }
 
   try {
-    await ElMessageBox.confirm(`确定删除「${batchTitle(batch)}」？相关任务记录和结果文件也会一起删除。`, '删除运行队列', { type: 'warning' })
+    await ElMessageBox.confirm(t('gallery.deleteBatchConfirm', { name: batchTitle(batch, t, locale.value) }), t('gallery.deleteBatchTitle'), { type: 'warning' })
     await $fetch(`/api/v1/batch/${batch.id}`, { method: 'DELETE' })
     selectedBatchIds.value = selectedBatchIds.value.filter(id => id !== batch.id)
     await fetchBatchRuns(true)
-    ElMessage.success('运行队列已删除')
+    ElMessage.success(t('gallery.deletedBatch'))
   } catch (error: unknown) {
     if (error === 'cancel' || error === 'close') return
-    ElMessage.error(error instanceof Error ? error.message : '删除失败')
+    ElMessage.error(error instanceof Error ? error.message : t('gallery.deleteFailed'))
   }
 }
 
@@ -124,20 +125,20 @@ async function deleteSelectedBatches() {
     selectedBatchIds.value.includes(batch.id) && batch.status !== 'queued' && batch.status !== 'running'
   )
   if (!deletable.length) {
-    ElMessage.warning('选中的批次都还在运行或排队，不能直接删除')
+    ElMessage.warning(t('gallery.noDeletableSelection'))
     return
   }
 
   try {
-    await ElMessageBox.confirm(`确定删除 ${deletable.length} 个已结束批次？相关任务记录和结果文件也会一起删除。`, '批量删除运行队列', { type: 'warning' })
+    await ElMessageBox.confirm(t('gallery.deleteSelectedConfirm', { count: deletable.length }), t('gallery.deleteSelectedTitle'), { type: 'warning' })
     await Promise.all(deletable.map(batch => $fetch(`/api/v1/batch/${batch.id}`, { method: 'DELETE' })))
     selectedBatchIds.value = []
     selectMode.value = false
     await fetchBatchRuns(true)
-    ElMessage.success(`已删除 ${deletable.length} 个批次`)
+    ElMessage.success(t('gallery.deletedSelected', { count: deletable.length }))
   } catch (error: unknown) {
     if (error === 'cancel' || error === 'close') return
-    ElMessage.error(error instanceof Error ? error.message : '批量删除失败')
+    ElMessage.error(error instanceof Error ? error.message : t('gallery.deleteSelectedFailed'))
   }
 }
 
@@ -176,23 +177,23 @@ onMounted(async () => {
   <section class="fm-page">
     <div class="fm-page-header">
       <div>
-        <h1 class="fm-page-title">运行与结果</h1>
+        <h1 class="fm-page-title">{{ t('gallery.title') }}</h1>
         <p class="fm-page-subtitle">
-          {{ selectMode ? '批量管理模式：点击批次选择整条运行记录，再统一删除。' : '运行队列就是结果入口，批次结束后从这里直接查看产物。' }}
+          {{ selectMode ? t('gallery.selectSubtitle') : t('gallery.subtitle') }}
         </p>
       </div>
       <div class="actions">
-        <ElButton v-if="!selectMode" :disabled="batchRuns.length === 0" @click="selectMode = true">批量管理</ElButton>
-        <ElButton v-else @click="cancelSelection">退出批量</ElButton>
-        <ElButton :loading="loading" type="primary" @click="fetchBatchRuns()">刷新</ElButton>
+        <ElButton v-if="!selectMode" :disabled="batchRuns.length === 0" @click="selectMode = true">{{ t('gallery.batchManage') }}</ElButton>
+        <ElButton v-else @click="cancelSelection">{{ t('gallery.exitBatchManage') }}</ElButton>
+        <ElButton :loading="loading" type="primary" @click="fetchBatchRuns()">{{ t('common.refresh') }}</ElButton>
       </div>
     </div>
 
     <section v-loading="loading" class="fm-card fm-stack">
       <div class="fm-section-head">
         <div>
-          <h2>运行队列</h2>
-          <span>点击整行查看结果；详情按钮进入执行详情。</span>
+          <h2>{{ t('gallery.queueTitle') }}</h2>
+          <span>{{ t('gallery.queueHint') }}</span>
         </div>
         <ElButton
           v-if="selectMode"
@@ -201,7 +202,7 @@ onMounted(async () => {
           :disabled="selectedBatchIds.length === 0"
           @click="deleteSelectedBatches"
         >
-          删除选中
+          {{ t('gallery.deleteSelected') }}
         </ElButton>
       </div>
 
@@ -218,8 +219,8 @@ onMounted(async () => {
           </span>
 
           <div class="queue-title">
-            <strong>{{ batchTitle(batch) }}</strong>
-            <span>{{ batchSubtitle(batch) }}</span>
+            <strong>{{ batchTitle(batch, t, locale) }}</strong>
+            <span>{{ batchSubtitle(batch, t, locale) }}</span>
           </div>
 
           <div class="queue-progress">
@@ -232,34 +233,32 @@ onMounted(async () => {
           </div>
 
           <div class="queue-stats">
-            <span>成功 {{ batch.completedTasks }}</span>
-            <span>失败 {{ batch.failedTasks }}</span>
+            <span>{{ t('gallery.succeededCount', { count: batch.completedTasks }) }}</span>
+            <span>{{ t('gallery.failedCount', { count: batch.failedTasks }) }}</span>
           </div>
 
-          <ElTag :type="statusType(batch.status)" size="small" effect="light">{{ statusLabel(batch.status) }}</ElTag>
+          <ElTag :type="statusType(batch.status)" size="small" effect="light">{{ statusLabel(batch.status, t) }}</ElTag>
 
           <div class="fm-actions">
-            <ElButton :size="rowActionSize" type="primary" @click.stop="openResults(batch.id)">结果</ElButton>
-            <ElButton :size="rowActionSize" @click.stop="openDetail(batch.id)">详情</ElButton>
-            <ElButton :size="rowActionSize" :loading="copyingBatchId === batch.id" @click.stop="copyBatchFirstTask(batch)">复制</ElButton>
+            <ElButton :size="rowActionSize" type="primary" @click.stop="openResults(batch.id)">{{ t('gallery.result') }}</ElButton>
+            <ElButton :size="rowActionSize" @click.stop="openDetail(batch.id)">{{ t('gallery.detail') }}</ElButton>
+            <ElButton :size="rowActionSize" :loading="copyingBatchId === batch.id" @click.stop="copyBatchFirstTask(batch)">{{ t('gallery.copy') }}</ElButton>
             <ElButton
               :size="rowActionSize"
               type="danger"
               plain
               :disabled="batch.status === 'queued' || batch.status === 'running'"
               @click.stop="deleteBatchRun(batch)"
-            >
-              删除
-            </ElButton>
+            >{{ t('common.delete') }}</ElButton>
           </div>
         </article>
       </div>
-      <ElEmpty v-else description="暂无运行队列，创建运行后会出现在这里。" />
+      <ElEmpty v-else :description="t('gallery.emptyQueue')" />
 
       <div v-if="page > 1 || hasNextPage" class="pagination-row">
-        <ElButton :disabled="page <= 1" @click="handlePageChange(page - 1)">上一页</ElButton>
-        <span>第 {{ page }} 页</span>
-        <ElButton :disabled="!hasNextPage" @click="handlePageChange(page + 1)">下一页</ElButton>
+        <ElButton :disabled="page <= 1" @click="handlePageChange(page - 1)">{{ t('gallery.previousPage') }}</ElButton>
+        <span>{{ t('gallery.page', { page }) }}</span>
+        <ElButton :disabled="!hasNextPage" @click="handlePageChange(page + 1)">{{ t('gallery.nextPage') }}</ElButton>
       </div>
     </section>
   </section>
@@ -393,3 +392,5 @@ onMounted(async () => {
   }
 }
 </style>
+
+

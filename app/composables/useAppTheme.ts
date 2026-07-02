@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: GPL-3.0-or-later
 import { appThemes } from '~/config/themes'
 
 const THEME_STORAGE_KEY = 'flowmatrix.theme'

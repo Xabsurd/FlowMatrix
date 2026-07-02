@@ -2,7 +2,7 @@
   "name": "flowmatrix",
   "version": "0.1.0-alpha.0",
   "type": "module",
-  "license": "AGPL-3.0-or-later",
+  "license": "GPL-3.0-or-later",
   "scripts": {
     "postinstall": "nuxt prepare",
     "dev": "nuxt dev --host 0.0.0.0",

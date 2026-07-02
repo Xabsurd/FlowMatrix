@@ -1,9 +1,9 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <template>
   <section class="fm-runtime-panel fm-card">
     <div class="fm-panel-heading">
-      <span>运行时输入</span>
-      <small v-if="params.length">每个参数维护一组候选值，运行会记录本次提交的参数。</small>
+      <span>{{ $t('runtime.title') }}</span>
+      <small v-if="params.length">{{ $t('runtime.subtitle') }}</small>
     </div>
 
     <div v-if="params.length" class="fm-runtime-table">
@@ -11,7 +11,7 @@
         <div class="fm-runtime-param">
           <div>
             <strong>{{ readableParamName(param) }}</strong>
-            <span>{{ param.nodeType }} · {{ param.inferredType }}</span>
+            <span>{{ param.nodeType }} · {{ effectiveInferredType(param) }}</span>
           </div>
           <ElTag size="small" effect="plain">{{ param.controlType }}</ElTag>
         </div>
@@ -35,7 +35,7 @@
               </div>
               <div class="fm-upload-count">
                 <strong>{{ activeFiles(paramKey(param)).length }}</strong>
-                <span>有效</span>
+                <span>{{ $t('runtime.valid') }}</span>
               </div>
             </div>
           </template>
@@ -48,7 +48,7 @@
               collapse-tags
               collapse-tags-tooltip
               :loading="resourceLoading"
-              placeholder="选择一个或多个资源"
+              :placeholder="$t('runtime.selectResources')"
               style="width: 100%"
               @update:model-value="setModelValues(param, $event)">
               <ElOption
@@ -117,17 +117,17 @@
                 </ElTooltip>
               </template>
             </template>
-            <span v-else class="fm-runtime-empty">未添加候选值</span>
+            <span v-else class="fm-runtime-empty">{{ $t('runtime.emptyCandidate') }}</span>
           </div>
         </div>
 
         <div class="fm-runtime-actions">
-          <ElButton v-if="!isFileParam(param) && !isModelParam(param)" :size="rowActionSize" type="primary" @click="addTextDraft(param)">添加</ElButton>
-          <ElButton :size="rowActionSize" @click="clearParamValues(param)">清空</ElButton>
+          <ElButton v-if="!isFileParam(param) && !isModelParam(param)" :size="rowActionSize" type="primary" @click="addTextDraft(param)">{{ $t('runtime.add') }}</ElButton>
+          <ElButton :size="rowActionSize" @click="clearParamValues(param)">{{ $t('runtime.clear') }}</ElButton>
         </div>
       </article>
     </div>
-    <ElEmpty v-else description="该配置没有运行时输入，开始运行会按固定参数创建 1 个任务。" />
+    <ElEmpty v-else :description="$t('runtime.noInputs')" />
 
     <input ref="fileInputRef" class="fm-hidden-input" type="file" :accept="fileInputAccept" multiple @change="handleRuntimeFiles">
   </section>
@@ -190,6 +190,8 @@ interface RuntimeCandidate {
   value: unknown
 }
 
+const { t } = useI18n()
+
 const props = defineProps<{
   params: NodeParam[]
   mode: string
@@ -226,7 +228,7 @@ watch(
         fileBuckets[key] ||= []
       } else if (!valueBuckets[key]) {
         const defaultText = valueToText(param.defaultValue)
-        valueBuckets[key] = defaultText ? [createCandidate(parseValue(defaultText, param.inferredType))] : []
+        valueBuckets[key] = defaultText ? [createCandidate(parseValue(defaultText, effectiveInferredType(param)))] : []
       }
       textDrafts[key] ||= ''
     }
@@ -246,7 +248,12 @@ function addTextDraft(param: NodeParam) {
   const key = paramKey(param)
   const text = textDrafts[key]?.trim()
   if (!text) return
-  addCandidate(param, parseValue(text, param.inferredType))
+  const valueType = effectiveInferredType(param)
+  if (!isValidValueText(text, valueType)) {
+    ElMessage.warning(t('runtime.invalidValue', { name: `${param.nodeType}.${param.inputName}`, type: typeLabel(valueType) }))
+    return
+  }
+  addCandidate(param, parseValue(text, valueType))
   textDrafts[key] = ''
 }
 
@@ -324,7 +331,7 @@ function handleFileDrop(event: DragEvent, param: NodeParam) {
 function addFilesToBucket(incoming: File[], target: { key: string; param: NodeParam }) {
   const files = incoming.filter(file => isAllowedFile(file, target.param))
   if (!files.length) {
-    ElMessage.warning(`请选择${fileTypeLabel(target.param)}文件`)
+    ElMessage.warning(t('runtime.selectFile', { type: fileTypeLabel(target.param) }))
     return
   }
   const bucket = fileBuckets[target.key] ?? (fileBuckets[target.key] = [])
@@ -338,14 +345,14 @@ async function collectParams() {
     if (isFileParam(param)) {
       const files = activeFiles(key)
       if (!files.length) {
-        ElMessage.warning(`请为 ${param.nodeType}.${param.inputName} 选择${fileTypeLabel(param)}文件`)
+        ElMessage.warning(t('runtime.selectParamFile', { name: `${param.nodeType}.${param.inputName}`, type: fileTypeLabel(param) }))
         return null
       }
       params[key] = await uploadRuntimeFiles(files)
     } else {
       const values = candidatesFor(param).map(candidate => candidate.value)
       if (!values.length) {
-        ElMessage.warning(`请为 ${param.nodeType}.${param.inputName} 添加候选值`)
+        ElMessage.warning(t('runtime.addCandidate', { name: `${param.nodeType}.${param.inputName}` }))
         return null
       }
       params[key] = values
@@ -371,7 +378,7 @@ function applyCopiedParams(inputParams: Record<string, unknown>) {
     const raw = inputParams[key]
     // Support both single values and arrays of candidate values
     const values = Array.isArray(raw) ? raw : [raw]
-    valueBuckets[key] = values.map(v => createCandidate(v))
+    valueBuckets[key] = values.map(value => createCandidate(normalizeCopiedValue(value, param)))
     applied++
   }
 
@@ -387,7 +394,7 @@ function emitEstimate() {
 
   const counts = props.params.map(candidateCount)
   if (counts.some(count => count === 0)) {
-    emit('estimate-change', '待填写')
+    emit('estimate-change', t('run.pendingInput'))
     return
   }
   emit('estimate-change', props.mode === 'cartesian'
@@ -431,10 +438,17 @@ function resourceOptionsFor(param: NodeParam) {
 
 function resourceTypeFor(param: NodeParam) {
   const key = `${param.nodeType}.${param.inputName}`
-  if (key === 'LoraLoader.lora_name' || param.controlType === 'lora-select') return 'lora'
-  if (param.nodeType === 'CheckpointLoaderSimple' || /ckpt|checkpoint/i.test(param.inputName)) return 'checkpoint'
-  if (param.nodeType === 'VAELoader') return 'vae'
-  if (param.nodeType === 'UNETLoader') return 'unet'
+  if (isScalarParam(param)) return ''
+  const nodeType = param.nodeType.toLowerCase()
+  const inputName = param.inputName.toLowerCase()
+  const combined = `${nodeType}.${inputName}`
+  if (key === 'LoraLoader.lora_name' || param.controlType === 'lora-select' || inputName === 'lora_name') return 'lora'
+  if (/^(ckpt|checkpoint)_?name$/.test(inputName) || /checkpointloader/.test(nodeType)) return 'checkpoint'
+  if (inputName === 'vae_name' || nodeType.includes('vaeloader')) return 'vae'
+  if (inputName === 'unet_name' || inputName === 'diffusion_model_name' || nodeType.includes('unetloader')) return 'unet'
+  if (/^control_?net_?name$/.test(inputName) || nodeType.includes('controlnetloader')) return 'controlnet'
+  if (/^upscale(r)?_?name$/.test(inputName) || nodeType.includes('upscalemodelloader')) return 'upscale'
+  if (inputName === 'embedding_name') return 'embedding'
   return ''
 }
 
@@ -499,7 +513,7 @@ function isFilePreviewVisible(id: string) {
 }
 
 function filePreviewType(file: RuntimeFile) {
-  return file.type || '未知类型'
+  return file.type || t('runtime.unknownType')
 }
 
 function filePreviewMark(file: RuntimeFile) {
@@ -510,7 +524,18 @@ function filePreviewMark(file: RuntimeFile) {
 }
 
 function isModelParam(param: NodeParam) {
-  return param.inferredType === 'MODEL' || param.controlType === 'lora-select' || param.controlType === 'select' && Boolean(resourceTypeFor(param))
+  if (isLoraStrengthParam(param)) return false
+  return param.inferredType === 'MODEL'
+    || param.controlType === 'lora-select'
+    || Boolean(resourceTypeFor(param))
+}
+
+function isScalarParam(param: NodeParam) {
+  return ['INT', 'FLOAT', 'BOOLEAN', 'SEED'].includes(param.inferredType) || isLoraStrengthParam(param)
+}
+
+function isLoraStrengthParam(param: Pick<NodeParam, 'nodeType' | 'inputName'>) {
+  return /lora/i.test(param.nodeType) && /^strength(_model|_clip)?$/i.test(param.inputName)
 }
 
 function isFileParam(param: NodeParam) {
@@ -572,9 +597,9 @@ function fileKind(param: NodeParam) {
 
 function fileTypeLabel(param: NodeParam) {
   const labels: Record<string, string> = {
-    image: '图片',
-    video: '视频',
-    audio: '音频',
+    image: t('runtime.labels.image'),
+    video: t('runtime.labels.video'),
+    audio: t('runtime.labels.audio'),
     json: 'JSON',
     file: ''
   }
@@ -602,27 +627,27 @@ function isAllowedFile(file: File, param: NodeParam) {
 }
 
 function uploadTitle(param: NodeParam) {
-  return `上传${fileTypeLabel(param) || '运行'}文件`
+  return t('runtime.uploadFile', { type: fileTypeLabel(param) || t('runtime.runFile') })
 }
 
 function uploadHint(param: NodeParam) {
-  const label = fileTypeLabel(param) || '任意'
-  return `点击或拖拽${label}文件到这里，可以一次选择多个。`
+  const label = fileTypeLabel(param) || t('runtime.anyFile')
+  return t('runtime.uploadHint', { type: label })
 }
 
 function readableParamName(param: NodeParam) {
   const labels: Record<string, string> = {
-    text: '提示词',
-    positive: '正向提示词',
-    negative: '反向提示词',
-    seed: '随机种子',
-    steps: '采样步数',
+    text: t('runtime.labels.prompt'),
+    positive: t('runtime.labels.positivePrompt'),
+    negative: t('runtime.labels.negativePrompt'),
+    seed: t('runtime.labels.seed'),
+    steps: t('runtime.labels.steps'),
     cfg: 'CFG',
-    width: '宽度',
-    height: '高度',
-    image: '图片',
-    mask: '蒙版',
-    file: '文件',
+    width: t('runtime.labels.width'),
+    height: t('runtime.labels.height'),
+    image: t('runtime.labels.image'),
+    mask: t('runtime.labels.mask'),
+    file: t('runtime.labels.file'),
     lora: 'Lora'
   }
   const name = param.inputName.toLowerCase()
@@ -631,9 +656,9 @@ function readableParamName(param: NodeParam) {
 }
 
 function singleValuePlaceholder(param: NodeParam) {
-  if (param.inferredType === 'SEED') return '输入随机种子，-1 表示随机'
+  if (param.inferredType === 'SEED') return t('runtime.randomSeedPlaceholder')
   if (param.inferredType === 'BOOLEAN') return 'true / false'
-  return valueToText(param.defaultValue) || '输入一个候选值'
+  return valueToText(param.defaultValue) || t('runtime.valuePlaceholder')
 }
 
 function parseValue(value: string, inferredType: string) {
@@ -648,6 +673,34 @@ function parseValue(value: string, inferredType: string) {
     }
   }
   return value
+}
+
+function normalizeCopiedValue(value: unknown, param: NodeParam) {
+  if (typeof value !== 'string') return value
+  const valueType = effectiveInferredType(param)
+  return isValidValueText(value, valueType)
+    ? parseValue(value, valueType)
+    : value
+}
+
+function effectiveInferredType(param: NodeParam) {
+  if (isLoraStrengthParam(param)) return 'FLOAT'
+  return param.inferredType
+}
+
+function isValidValueText(value: string, inferredType: string) {
+  if (inferredType === 'INT' || inferredType === 'SEED') return /^[-+]?\d+$/.test(value)
+  if (inferredType === 'FLOAT') return Number.isFinite(Number(value))
+  return true
+}
+
+function typeLabel(type: string) {
+  const labels: Record<string, string> = {
+    INT: t('runtime.labels.int'),
+    FLOAT: t('runtime.labels.float'),
+    SEED: t('runtime.labels.seed')
+  }
+  return labels[type] || t('runtime.labels.value')
 }
 
 function valueToText(value: unknown) {

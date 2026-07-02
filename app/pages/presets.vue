@@ -1,12 +1,12 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <template>
   <section class="fm-page">
     <div class="fm-page-header">
       <div>
-        <h1 class="fm-page-title">调用配置</h1>
-        <p class="fm-page-subtitle">按节点添加参数，决定哪些在运行时填写，哪些作为固定值写入工作流。</p>
+        <h1 class="fm-page-title">{{ t('presetsPage.title') }}</h1>
+        <p class="fm-page-subtitle">{{ t('presetsPage.subtitle') }}</p>
       </div>
-      <ElButton type="primary" @click="openCreateDialog">新建配置</ElButton>
+      <ElButton type="primary" @click="openCreateDialog">{{ t('presetsPage.create') }}</ElButton>
     </div>
 
     <div v-if="presets.length" class="fm-card-grid">
@@ -14,25 +14,25 @@
         <div class="fm-card-header">
           <div>
             <h3>{{ preset.name }}</h3>
-            <p>{{ preset.description || '未填写描述' }}</p>
+            <p>{{ preset.description || t('presetsPage.noDescription') }}</p>
           </div>
           <div class="fm-card-actions">
             <ElTag size="small">{{ preset.scheduleMode }}</ElTag>
-            <ElButton text :size="rowActionSize" @click="openEditDialog(preset)">编辑</ElButton>
-            <ElButton text :size="rowActionSize" type="danger" @click="removePreset(preset)">删除</ElButton>
+            <ElButton text :size="rowActionSize" @click="openEditDialog(preset)">{{ t('workflows.edit') }}</ElButton>
+            <ElButton text :size="rowActionSize" type="danger" @click="removePreset(preset)">{{ t('common.delete') }}</ElButton>
           </div>
         </div>
         <div class="fm-card-body">
           <div class="fm-meta-row">
-            <span class="fm-label">运行输入</span>
+            <span class="fm-label">{{ t('run.runtimeInputs') }}</span>
             <span class="fm-value">{{ preset.nodeParams.filter(param => param.runtimeInput).length }}</span>
           </div>
           <div class="fm-meta-row">
-            <span class="fm-label">固定参数</span>
+            <span class="fm-label">{{ t('run.fixedParams') }}</span>
             <span class="fm-value">{{ preset.nodeParams.filter(param => !param.runtimeInput).length }}</span>
           </div>
           <div class="fm-meta-row">
-            <span class="fm-label">输出节点</span>
+            <span class="fm-label">{{ t('presetsPage.outputNodes') }}</span>
             <span class="fm-value">{{ enabledOutputCount(preset) }}</span>
           </div>
           <div class="fm-node-list">
@@ -50,40 +50,40 @@
       </article>
     </div>
 
-    <ElEmpty v-else-if="!loading" description="暂无调用配置，点击「新建配置」从工作流生成。" />
+    <ElEmpty v-else-if="!loading" :description="t('presetsPage.empty')" />
 
-    <ElDialog v-model="showCreateDialog" :title="editingId ? '编辑调用配置' : '新建调用配置'" width="860px">
+    <ElDialog v-model="showCreateDialog" :title="editingId ? t('presetsPage.editDialog') : t('presetsPage.createDialog')" width="860px">
       <ElForm label-position="top">
-        <ElFormItem label="配置名称" required>
-          <ElInput v-model="form.name" placeholder="例如：文生图基础配置" />
+        <ElFormItem :label="t('presetsPage.name')" required>
+          <ElInput v-model="form.name" :placeholder="t('presetsPage.namePlaceholder')" />
         </ElFormItem>
-        <ElFormItem label="工作流" required>
-          <ElSelect v-model="form.workflowId" placeholder="请选择已上传工作流" filterable style="width: 100%" :disabled="Boolean(editingId)">
+        <ElFormItem :label="t('presetsPage.workflow')" required>
+          <ElSelect v-model="form.workflowId" :placeholder="t('presetsPage.workflowPlaceholder')" filterable style="width: 100%" :disabled="Boolean(editingId)">
             <ElOption
               v-for="workflow in workflows"
               :key="workflow.id"
-              :label="`${workflow.name} · ${workflow.parsedNodes?.length || 0} 个节点`"
+              :label="`${workflow.name} · ${t('presetsPage.workflowOptionNodes', { count: workflow.parsedNodes?.length || 0 })}`"
               :value="workflow.id"
             />
           </ElSelect>
         </ElFormItem>
         <div class="fm-form-grid">
-          <ElFormItem label="调度模式">
+          <ElFormItem :label="t('presetsPage.scheduleMode')">
             <ElSelect v-model="form.scheduleMode" style="width: 100%">
-              <ElOption label="空闲优先" value="idle-first" />
-              <ElOption label="最少队列" value="least-queue" />
-              <ElOption label="资源匹配" value="resource-match" />
-              <ElOption label="智能调度" value="smart" />
+              <ElOption :label="t('run.scheduleIdleFirst')" value="idle-first" />
+              <ElOption :label="t('run.scheduleLeastQueue')" value="least-queue" />
+              <ElOption :label="t('run.scheduleResourceMatch')" value="resource-match" />
+              <ElOption :label="t('run.scheduleSmart')" value="smart" />
             </ElSelect>
           </ElFormItem>
-          <ElFormItem label="描述">
-            <ElInput v-model="form.description" placeholder="用途、适用模型或参数说明" />
+          <ElFormItem :label="t('presetsPage.description')">
+            <ElInput v-model="form.description" :placeholder="t('presetsPage.descriptionPlaceholder')" />
           </ElFormItem>
         </div>
 
         <div class="fm-builder">
           <div class="fm-builder-toolbar">
-            <ElSelect v-model="draft.nodeKey" placeholder="选择节点" filterable>
+            <ElSelect v-model="draft.nodeKey" :placeholder="t('presetsPage.selectNode')" filterable>
               <ElOption
                 v-for="node in selectableNodes"
                 :key="node.nodeId"
@@ -91,7 +91,7 @@
                 :value="node.nodeId"
               />
             </ElSelect>
-            <ElSelect v-model="draft.inputName" placeholder="选择参数" filterable :disabled="!draft.nodeKey">
+            <ElSelect v-model="draft.inputName" :placeholder="t('presetsPage.selectParam')" filterable :disabled="!draft.nodeKey">
               <ElOption
                 v-for="input in selectableInputs"
                 :key="input.name"
@@ -102,40 +102,50 @@
             <ElSwitch
               v-model="draft.runtimeInput"
               inline-prompt
-              active-text="运行"
-              inactive-text="固定"
+              :active-text="t('presetsPage.runtime')"
+              :inactive-text="t('presetsPage.fixed')"
             />
-            <ElButton type="primary" @click="addParam">添加参数</ElButton>
+            <ElButton type="primary" @click="addParam">{{ t('presetsPage.addParam') }}</ElButton>
           </div>
 
           <div v-if="configuredParams.length" class="fm-param-list">
             <div v-for="(param, index) in configuredParams" :key="param.key" class="fm-param-row">
               <div class="fm-param-main">
                 <strong>{{ param.nodeType }}.{{ param.inputName }}</strong>
-                <small>{{ param.nodeId }} · {{ param.controlType }} · {{ param.runtimeInput ? '运行界面显示' : '固定值写入工作流' }}</small>
+                <small>{{ param.nodeId }} · {{ param.controlType }} · {{ param.runtimeInput ? t('presetsPage.runtimeVisible') : t('presetsPage.fixedWritten') }}</small>
               </div>
               <ElSwitch
                 v-model="param.runtimeInput"
                 inline-prompt
-                active-text="运行"
-                inactive-text="固定"
+                :active-text="t('presetsPage.runtime')"
+                :inactive-text="t('presetsPage.fixed')"
               />
+              <ElSelect
+                v-if="isManualNumericParam(param)"
+                v-model="param.inferredType"
+                class="fm-type-select"
+                :placeholder="t('presetsPage.valueType')"
+              >
+                <ElOption :label="t('presetsPage.integer')" value="INT" />
+                <ElOption :label="t('presetsPage.float')" value="FLOAT" />
+              </ElSelect>
+              <span v-else class="fm-type-static">{{ typeLabel(param.inferredType) }}</span>
               <ElInput
                 v-model="param.defaultText"
                 :disabled="param.runtimeInput"
-                placeholder="固定值"
+                :placeholder="t('presetsPage.fixedValue')"
                 class="fm-fixed-input"
               />
-              <ElButton text :size="rowActionSize" type="danger" @click="configuredParams.splice(index, 1)">移除</ElButton>
+              <ElButton text :size="rowActionSize" type="danger" @click="configuredParams.splice(index, 1)">{{ t('presetsPage.remove') }}</ElButton>
             </div>
           </div>
-          <ElEmpty v-else description="请从上方选择节点和参数后添加。" />
+          <ElEmpty v-else :description="t('presetsPage.addHint')" />
         </div>
 
         <div class="fm-output-builder">
           <div class="fm-section-heading">
-            <strong>输出节点</strong>
-            <span>只保存勾选节点产生的结果文件</span>
+            <strong>{{ t('presetsPage.outputNodes') }}</strong>
+            <span>{{ t('presetsPage.outputHint') }}</span>
           </div>
           <div v-if="outputNodeOptions.length" class="fm-output-list">
             <label
@@ -150,12 +160,12 @@
               </div>
             </label>
           </div>
-          <ElEmpty v-else description="未识别到常见输出节点，运行时将保留所有输出。" />
+          <ElEmpty v-else :description="t('presetsPage.noOutputNodes')" />
         </div>
       </ElForm>
       <template #footer>
-        <ElButton @click="showCreateDialog = false">取消</ElButton>
-        <ElButton type="primary" :loading="saving" @click="savePreset">{{ editingId ? '保存修改' : '保存配置' }}</ElButton>
+        <ElButton @click="showCreateDialog = false">{{ t('common.cancel') }}</ElButton>
+        <ElButton type="primary" :loading="saving" @click="savePreset">{{ editingId ? t('presetsPage.saveChanges') : t('presetsPage.savePreset') }}</ElButton>
       </template>
     </ElDialog>
   </section>
@@ -164,6 +174,7 @@
 <script setup lang="ts">
 import { ElMessage, ElMessageBox } from 'element-plus'
 
+const { t } = useI18n()
 const { rowActionSize } = useUiPreferences()
 
 interface ParsedNodeInput {
@@ -283,7 +294,7 @@ async function fetchData() {
 
 function openCreateDialog() {
   if (!workflows.value.length) {
-    ElMessage.warning('请先上传工作流')
+    ElMessage.warning(t('presetsPage.uploadWorkflowFirst'))
     return
   }
   editingId.value = ''
@@ -326,13 +337,13 @@ function addParam() {
   const node = selectedNode.value
   const input = node?.inputs[draft.inputName]
   if (!node || !input) {
-    ElMessage.warning('请选择节点和参数')
+    ElMessage.warning(t('presetsPage.selectNodeParam'))
     return
   }
 
   const key = `${node.nodeId}.${draft.inputName}`
   if (configuredParams.value.some(param => param.key === key)) {
-    ElMessage.warning('该参数已添加')
+    ElMessage.warning(t('presetsPage.paramExists'))
     return
   }
 
@@ -350,6 +361,17 @@ function addParam() {
 }
 
 async function savePreset() {
+  for (const param of configuredParams.value) {
+    const fixedValue = param.defaultText.trim()
+    if (!param.runtimeInput && fixedValue && !isValidValueText(fixedValue, param.inferredType)) {
+      ElMessage.warning(t('presetsPage.invalidFixedValue', {
+        name: param.nodeType + '.' + param.inputName,
+        type: typeLabel(param.inferredType)
+      }))
+      return
+    }
+  }
+
   const nodeParams = configuredParams.value.map(({ key: _key, defaultText, ...param }) => ({
     ...param,
     defaultValue: parseValue(defaultText, param.inferredType)
@@ -362,11 +384,11 @@ async function savePreset() {
   }))
 
   if (!form.name.trim() || !form.workflowId) {
-    ElMessage.warning('请填写名称并选择工作流')
+    ElMessage.warning(t('presetsPage.fillNameWorkflow'))
     return
   }
   if (!nodeParams.length) {
-    ElMessage.warning('请至少添加一个节点参数')
+    ElMessage.warning(t('presetsPage.addOneParam'))
     return
   }
 
@@ -388,16 +410,16 @@ async function savePreset() {
     })
     showCreateDialog.value = false
     await fetchData()
-    ElMessage.success(editingId.value ? '调用配置已更新' : '调用配置已保存')
+    ElMessage.success(editingId.value ? t('presetsPage.updated') : t('presetsPage.saved'))
   } catch (error: unknown) {
-    ElMessage.error(error instanceof Error ? error.message : '保存失败')
+    ElMessage.error(error instanceof Error ? error.message : t('presetsPage.saveFailed'))
   } finally {
     saving.value = false
   }
 }
 
 function enabledOutputCount(preset: Preset) {
-  if (!preset.outputNodes?.length) return '全部'
+  if (!preset.outputNodes?.length) return t('presetsPage.all')
   return preset.outputNodes.filter(node => node.enabled).length
 }
 
@@ -418,19 +440,26 @@ function isOutputNode(node: ParsedNode) {
 
 async function removePreset(preset: Preset) {
   try {
-    await ElMessageBox.confirm(`确定删除「${preset.name}」？已创建的历史运行记录不会被删除。`, '删除调用配置', { type: 'warning' })
+    await ElMessageBox.confirm(t('presetsPage.deleteConfirm', { name: preset.name }), t('presetsPage.deleteTitle'), { type: 'warning' })
     await $fetch(`/api/v1/presets/${preset.id}`, { method: 'DELETE' })
     await fetchData()
-    ElMessage.success('调用配置已删除')
+    ElMessage.success(t('presetsPage.deleted'))
   } catch (error: unknown) {
     if (error === 'cancel' || error === 'close') return
-    ElMessage.error(error instanceof Error ? error.message : '删除失败')
+    ElMessage.error(error instanceof Error ? error.message : t('presetsPage.deleteFailed'))
   }
 }
 
 function inferParam(nodeType: string, inputName: string, input: ParsedNodeInput) {
   const known = knownParams[`${nodeType}.${inputName}`]
   if (known) return known
+  const modelResourceType = resourceTypeForParam(nodeType, inputName)
+  if (modelResourceType) {
+    return {
+      inferredType: 'MODEL',
+      controlType: modelResourceType === 'lora' ? 'lora-select' : 'select'
+    }
+  }
   if (isPrimitiveValueInput({ nodeType } as ParsedNode, inputName)) return inferPrimitiveParam(nodeType)
   if (input.type === 'INT') return { inferredType: 'INT', controlType: 'number' }
   if (input.type === 'FLOAT') return { inferredType: 'FLOAT', controlType: 'number' }
@@ -463,6 +492,19 @@ function isFileInput(inputName: string) {
   return name.includes('file') || name.includes('video') || name.includes('audio')
 }
 
+function resourceTypeForParam(nodeType: string, inputName: string) {
+  const lowerNodeType = nodeType.toLowerCase()
+  const lowerInputName = inputName.toLowerCase()
+  if (lowerInputName === 'lora_name') return 'lora'
+  if (/^(ckpt|checkpoint)_?name$/.test(lowerInputName) || /checkpointloader/.test(lowerNodeType)) return 'checkpoint'
+  if (lowerInputName === 'vae_name' || lowerNodeType.includes('vaeloader')) return 'vae'
+  if (lowerInputName === 'unet_name' || lowerInputName === 'diffusion_model_name' || lowerNodeType.includes('unetloader')) return 'unet'
+  if (/^control_?net_?name$/.test(lowerInputName) || lowerNodeType.includes('controlnetloader')) return 'controlnet'
+  if (/^upscale(r)?_?name$/.test(lowerInputName) || lowerNodeType.includes('upscalemodelloader')) return 'upscale'
+  if (lowerInputName === 'embedding_name') return 'embedding'
+  return ''
+}
+
 function valueToText(value: unknown) {
   if (value === undefined || value === null) return ''
   return typeof value === 'object' ? JSON.stringify(value) : String(value)
@@ -478,6 +520,33 @@ function parseValue(value: string, inferredType: string) {
   return value
 }
 
+function isManualNumericParam(param: Pick<NodeParam, 'inferredType' | 'controlType'>) {
+  return (param.inferredType === 'INT' || param.inferredType === 'FLOAT')
+    && (param.controlType === 'number' || param.controlType === 'slider')
+}
+
+function isValidValueText(value: string, inferredType: string) {
+  if (inferredType === 'INT' || inferredType === 'SEED') return /^[-+]?\d+$/.test(value)
+  if (inferredType === 'FLOAT') return Number.isFinite(Number(value))
+  return true
+}
+
+function typeLabel(type: string) {
+  const labels: Record<string, string> = {
+    STRING: t('presetsPage.text'),
+    INT: t('presetsPage.integer'),
+    FLOAT: t('presetsPage.float'),
+    BOOLEAN: t('presetsPage.boolean'),
+    ENUM: t('presetsPage.enum'),
+    MODEL: t('presetsPage.model'),
+    SEED: t('presetsPage.seed'),
+    JSON: 'JSON',
+    IMAGE: t('presetsPage.image'),
+    FILE: t('presetsPage.file')
+  }
+  return labels[type] || type
+}
+
 const knownParams: Record<string, { inferredType: string; controlType: string; options?: unknown[] }> = {
   'CLIPTextEncode.text': { inferredType: 'STRING', controlType: 'textarea' },
   'KSampler.seed': { inferredType: 'SEED', controlType: 'seed-input' },
@@ -488,7 +557,12 @@ const knownParams: Record<string, { inferredType: string; controlType: string; o
   'EmptyLatentImage.width': { inferredType: 'INT', controlType: 'number' },
   'EmptyLatentImage.height': { inferredType: 'INT', controlType: 'number' },
   'LoraLoader.lora_name': { inferredType: 'MODEL', controlType: 'lora-select' },
-  'CheckpointLoaderSimple.ckpt_name': { inferredType: 'MODEL', controlType: 'select' }
+  'LoraLoader.strength_model': { inferredType: 'FLOAT', controlType: 'slider' },
+  'LoraLoader.strength_clip': { inferredType: 'FLOAT', controlType: 'slider' },
+  'LoraLoaderModelOnly.strength_model': { inferredType: 'FLOAT', controlType: 'slider' },
+  'CheckpointLoaderSimple.ckpt_name': { inferredType: 'MODEL', controlType: 'select' },
+  'VAELoader.vae_name': { inferredType: 'MODEL', controlType: 'select' },
+  'UNETLoader.unet_name': { inferredType: 'MODEL', controlType: 'select' }
 }
 
 onMounted(fetchData)
@@ -511,10 +585,12 @@ onMounted(fetchData)
 .fm-section-heading span { color: var(--fm-muted); font-size: 12px; }
 .fm-builder-toolbar { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto auto; align-items: center; gap: 10px; }
 .fm-param-list { display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow: auto; }
-.fm-param-row { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(180px, 240px) auto; align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--fm-border); border-radius: var(--fm-radius); background: color-mix(in srgb, var(--fm-panel-muted) 72%, transparent); }
+.fm-param-row { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(104px, 132px) minmax(180px, 240px) auto; align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--fm-border); border-radius: var(--fm-radius); background: color-mix(in srgb, var(--fm-panel-muted) 72%, transparent); }
 .fm-param-main { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
 .fm-param-main strong { color: var(--fm-text); font-size: 13px; }
 .fm-param-main small { color: var(--fm-muted); overflow-wrap: anywhere; }
+.fm-type-select { min-width: 0; }
+.fm-type-static { min-width: 72px; color: var(--fm-muted); font-size: 12px; text-align: center; }
 .fm-fixed-input { min-width: 0; }
 .fm-output-builder { display: grid; gap: 12px; margin-top: 16px; }
 .fm-output-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }

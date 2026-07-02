@@ -1,7 +1,8 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: GPL-3.0-or-later
 import type { BatchDetail, BatchRun, ResultFile, Task } from '~/types/gallery'
 
 export const COPIED_TASK_STORAGE_KEY = 'flowmatrix.copied-task'
+type Translate = (key: string, params?: Record<string, unknown>) => string
 
 export function visibleInputParams(inputParams: Record<string, unknown>) {
   return Object.entries(inputParams).filter(([key]) => !key.startsWith('_'))
@@ -23,30 +24,34 @@ export function isAudioResult(result: Pick<ResultFile, 'outputType' | 'mimeType'
   return result.outputType === 'audio' || result.mimeType?.startsWith('audio/')
 }
 
-export function resultKindLabel(result: Pick<ResultFile, 'outputType' | 'mimeType'>) {
-  if (isImageResult(result)) return '图片'
-  if (isVideoResult(result)) return '视频'
-  if (isAudioResult(result)) return '音频'
-  if (result.outputType === 'text') return '文本'
-  return '文件'
+export function resultKindLabel(result: Pick<ResultFile, 'outputType' | 'mimeType'>, t: Translate) {
+  if (isImageResult(result)) return t('gallery.image')
+  if (isVideoResult(result)) return t('gallery.video')
+  if (isAudioResult(result)) return t('gallery.audio')
+  if (result.outputType === 'text') return t('gallery.text')
+  return t('gallery.file')
 }
 
 export function paramValueKey(key: string, value: unknown) {
   return `${key}:${JSON.stringify(value)}`
 }
 
-export function paramValueLabel(value: unknown) {
-  if (typeof value === 'object' && value !== null) return '文件/资源'
+export function paramValueLabel(value: unknown, t: Translate) {
+  if (typeof value === 'object' && value !== null) return t('gallery.fileResource')
   return String(value)
 }
 
-export function batchTitle(batch: BatchRun) {
-  return batch.name || `运行批次 ${formatTime(batch.createdAt)}`
+export function batchTitle(batch: BatchRun, t: Translate, locale = 'zh-CN') {
+  return batch.name || t('gallery.batchFallback', { time: formatTime(batch.createdAt, locale) })
 }
 
-export function batchSubtitle(batch: BatchRun) {
-  const finished = batch.finishedAt ? ` · 完成于 ${formatTime(batch.finishedAt)}` : ''
-  return `${modeLabel(batch.combinationMode)} · 创建于 ${formatTime(batch.createdAt)}${finished}`
+export function batchSubtitle(batch: BatchRun, t: Translate, locale = 'zh-CN') {
+  const finished = batch.finishedAt ? ' · ' + t('gallery.finishedAt', { time: formatTime(batch.finishedAt, locale) }) : ''
+  return t('gallery.batchSubtitle', {
+    mode: modeLabel(batch.combinationMode, t),
+    created: formatTime(batch.createdAt, locale),
+    finished
+  })
 }
 
 type BatchProgressSource = BatchRun | BatchDetail
@@ -96,37 +101,37 @@ export function statusType(status: string) {
   return 'info'
 }
 
-export function statusLabel(status: string) {
+export function statusLabel(status: string, t: Translate) {
   const labels: Record<string, string> = {
-    queued: '排队中',
-    running: '运行中',
-    completed: '已完成',
-    succeeded: '成功',
-    failed: '失败',
-    canceled: '已取消',
-    retrying: '重试中'
+    queued: 'gallery.statusQueued',
+    running: 'gallery.statusRunning',
+    completed: 'gallery.statusCompleted',
+    succeeded: 'gallery.statusSucceeded',
+    failed: 'gallery.statusFailed',
+    canceled: 'gallery.statusCanceled',
+    retrying: 'gallery.statusRetrying'
   }
-  return labels[status] || status
+  return labels[status] ? t(labels[status]) : status
 }
 
-export function modeLabel(mode: string) {
-  if (mode === 'zip') return '逐行'
-  if (mode === 'table') return '表格'
-  return '笛卡尔'
+export function modeLabel(mode: string, t: Translate) {
+  if (mode === 'zip') return t('gallery.modeZip')
+  if (mode === 'table') return t('gallery.modeTable')
+  return t('gallery.modeCartesian')
 }
 
-export function taskParamSummary(task: Pick<Task, 'inputParams'>) {
+export function taskParamSummary(task: Pick<Task, 'inputParams'>, t: Translate) {
   const params = visibleInputParams(task.inputParams)
-  if (!params.length) return '无运行参数'
+  if (!params.length) return t('gallery.noRuntimeParams')
   return params
     .slice(0, 3)
-    .map(([key, value]) => `${key.split('.').pop()}: ${paramValueLabel(value)}`)
+    .map(([key, value]) => String(key.split('.').pop()) + ': ' + paramValueLabel(value, t))
     .join(' · ')
 }
 
-export function formatTime(value: number | undefined) {
+export function formatTime(value: number | undefined, locale = 'zh-CN') {
   if (!value) return '-'
-  return new Date(value).toLocaleString('zh-CN')
+  return new Date(value).toLocaleString(locale)
 }
 
 export function formatDuration(task: Pick<Task, 'startedAt' | 'finishedAt'>) {

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: GPL-3.0-or-later
 export type ProviderKind = 'openai-compatible'
 
 export interface ProviderRuntimeConfig {
@@ -24,6 +24,11 @@ export interface GenerateImageInput {
   quality?: 'low' | 'medium' | 'high' | 'auto'
   outputFormat?: 'png' | 'webp' | 'jpeg'
   n?: number
+  imageInputs?: Array<{
+    data: Uint8Array
+    fileName: string
+    mimeType?: string
+  }>
 }
 
 export interface ProviderImageArtifact {
