@@ -111,7 +111,11 @@
     "providerGuideText": "Save an OpenAI-compatible endpoint, then add an Online API backend in Backends with endpoint openai. Use the Online API section on the Run page for batch text-to-image or image-to-image.",
     "addOnlineBackend": "Add Online API Backend",
     "savedApiKeyPlaceholder": "Key saved; leave blank to keep it",
-    "apiKeyPlaceholder": "Used for connection tests and Worker execution after saving"
+    "apiKeyPlaceholder": "Used for connection tests and Worker execution after saving",
+    "fetchProviderModels": "Fetch models",
+    "providerModelPlaceholder": "Fetched after Base URL and API Key are entered",
+    "providerModelsLoaded": "Fetched {count} provider model(s)",
+    "providerModelsEmpty": "Provider returned no available models"
   },
   "run": {
     "title": "Run",
@@ -421,6 +425,7 @@
     "noCopyableTask": "This batch has no copyable tasks",
     "copiedParamsBack": "Copied {count} parameters, returning to Run page",
     "copyFailed": "Copy failed",
+    "onlineCopyUnavailable": "Online API tasks can be resubmitted from the Online API tab on the Run page",
     "cancelBeforeDelete": "Cancel running queues before deleting",
     "deleteBatchConfirm": "Delete \"{name}\"? Related task records and result files will also be deleted.",
     "deleteBatchTitle": "Delete Run Queue",

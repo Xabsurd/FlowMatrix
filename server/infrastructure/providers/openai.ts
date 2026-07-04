@@ -31,6 +31,57 @@ function assertProviderConfig(config: ProviderRuntimeConfig) {
   }
 }
 
+function isUnsupportedModelsEndpoint(error: unknown) {
+  const status = typeof error === 'object' && error !== null && 'status' in error
+    ? Number((error as { status?: number }).status)
+    : 0
+  if ([404, 405, 501].includes(status)) return true
+
+  const message = error instanceof Error ? error.message : String(error)
+  return /\bmodels\b/i.test(message) && /not found|unsupported|not implemented|method not allowed/i.test(message)
+}
+
+function usesGptImageOptions(model: string) {
+  return /^gpt-image(?:-|$)/i.test(model)
+}
+
+function isLikelyImageModel(model: string) {
+  return /(?:gpt-image|dall-e|image|imagen|flux|stable-diffusion|sdxl|\bsd\d|qwen[-_.]?image|kolors|janus|hidream|ideogram|recraft|seedream)/i.test(model)
+}
+
+function sortModels(models: string[]) {
+  return [...new Set(models)]
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true }))
+}
+
+function pickImageModels(models: string[]) {
+  const sorted = sortModels(models)
+  const imageModels = sorted.filter(isLikelyImageModel)
+  return imageModels.length ? imageModels : sorted
+}
+
+function createImageRequest(input: GenerateImageInput, model: string) {
+  const request: Record<string, unknown> = {
+    model,
+    prompt: input.prompt,
+    n: input.n || 1
+  }
+
+  if (input.size && input.size !== 'auto') request.size = input.size
+
+  if (usesGptImageOptions(model)) {
+    request.size = input.size || '1024x1024'
+    request.quality = input.quality || 'auto'
+    request.output_format = input.outputFormat || 'png'
+  } else {
+    request.response_format = 'b64_json'
+    if (input.quality && input.quality !== 'auto') request.quality = input.quality
+  }
+
+  return request
+}
+
 export const openaiProviderAdapter: OnlineProviderAdapter = {
   descriptor: {
     id: 'openai',
@@ -46,12 +97,28 @@ export const openaiProviderAdapter: OnlineProviderAdapter = {
 
     const startedAt = Date.now()
     const client = createClient(config)
-    await client.models.list()
-
-    return {
-      ok: true,
-      message: `OK ${Date.now() - startedAt}ms`
+    try {
+      await client.models.list()
+      return {
+        ok: true,
+        message: `OK ${Date.now() - startedAt}ms`
+      }
+    } catch (error) {
+      if (!isUnsupportedModelsEndpoint(error)) throw error
+      return {
+        ok: true,
+        message: `OK ${Date.now() - startedAt}ms (provider does not expose /models)`
+      }
     }
+  },
+
+  async listImageModels(config) {
+    assertProviderConfig(config)
+
+    const client = createClient(config)
+    const response = await client.models.list()
+    const models = response.data.map(model => model.id)
+    return pickImageModels(models)
   },
 
   async generateImage(config: ProviderRuntimeConfig, input: GenerateImageInput) {
@@ -60,24 +127,13 @@ export const openaiProviderAdapter: OnlineProviderAdapter = {
     const client = createClient(config)
     const model = input.model || config.model
     const imageInputs = input.imageInputs || []
+    const request = createImageRequest(input, model)
     const response = imageInputs.length
       ? await client.images.edit({
-          model,
-          image: await Promise.all(imageInputs.map(image => toFile(image.data, image.fileName, { type: image.mimeType }))),
-          prompt: input.prompt,
-          n: input.n || 1,
-          size: input.size || '1024x1024',
-          quality: input.quality || 'auto',
-          output_format: input.outputFormat || 'png'
-        } as Parameters<typeof client.images.edit>[0])
-      : await client.images.generate({
-          model,
-          prompt: input.prompt,
-          n: input.n || 1,
-          size: input.size || '1024x1024',
-          quality: input.quality || 'auto',
-          output_format: input.outputFormat || 'png'
-        } as Parameters<typeof client.images.generate>[0])
+          ...request,
+          image: await Promise.all(imageInputs.map(image => toFile(image.data, image.fileName, { type: image.mimeType })))
+        } as unknown as Parameters<typeof client.images.edit>[0])
+      : await client.images.generate(request as unknown as Parameters<typeof client.images.generate>[0])
     const images = 'data' in response && Array.isArray(response.data) ? response.data : []
 
     return {

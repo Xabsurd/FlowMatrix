@@ -49,5 +49,6 @@ export interface ProviderGenerateResult {
 export interface OnlineProviderAdapter {
   descriptor: ProviderDescriptor
   testConnection(config: ProviderRuntimeConfig): Promise<{ ok: boolean, message: string }>
+  listImageModels(config: ProviderRuntimeConfig): Promise<string[]>
   generateImage(config: ProviderRuntimeConfig, input: GenerateImageInput): Promise<ProviderGenerateResult>
 }

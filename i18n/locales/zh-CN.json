@@ -111,7 +111,11 @@
     "providerGuideText": "先保存 OpenAI 兼容接口，再去执行后端添加类型为在线 API 的后端，端点填 openai；运行页选择在线 API 栏目即可批量文生图或图生图。",
     "addOnlineBackend": "添加在线 API 后端",
     "savedApiKeyPlaceholder": "已保存密钥；留空则不覆盖",
-    "apiKeyPlaceholder": "保存后用于连接测试和 Worker 执行"
+    "apiKeyPlaceholder": "保存后用于连接测试和 Worker 执行",
+    "fetchProviderModels": "获取模型",
+    "providerModelPlaceholder": "输入 Base URL 和 API Key 后自动获取",
+    "providerModelsLoaded": "已获取 {count} 个服务商模型",
+    "providerModelsEmpty": "服务商没有返回可用模型"
   },
   "run": {
     "title": "运行",
@@ -421,6 +425,7 @@
     "noCopyableTask": "这个批次没有可复制的任务",
     "copiedParamsBack": "已复制 {count} 个参数，正在返回运行页",
     "copyFailed": "复制任务失败",
+    "onlineCopyUnavailable": "在线 API 任务请在运行页的在线 API 栏重新提交",
     "cancelBeforeDelete": "请先取消运行中的队列，再删除",
     "deleteBatchConfirm": "确定删除「{name}」？相关任务记录和结果文件也会一起删除。",
     "deleteBatchTitle": "删除运行队列",

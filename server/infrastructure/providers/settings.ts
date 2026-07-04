@@ -115,23 +115,41 @@ export function upsertProviderSettings(input: ProviderSettingsInput) {
   return getProviderSettings(input.workspaceId, input.providerId)
 }
 
-export function getProviderRuntimeConfig(workspaceId: string, providerId = 'openai'): ProviderRuntimeConfig {
+export function resolveProviderRuntimeConfig(input: {
+  workspaceId: string
+  providerId?: string
+  baseUrl?: string
+  model?: string
+  apiKey?: string
+}): ProviderRuntimeConfig {
+  const providerId = input.providerId || 'openai'
   const row = getSqlite().prepare(`
     SELECT * FROM provider_secrets
     WHERE workspace_id = ? AND provider_id = ?
-  `).get(workspaceId, providerId) as ProviderSettingsRow | undefined
+  `).get(input.workspaceId, providerId) as ProviderSettingsRow | undefined
 
-  if (!row) {
+  const apiKey = input.apiKey?.trim() || (row?.encrypted_api_key ? decryptSecret(row.encrypted_api_key) : '')
+  const baseUrl = input.baseUrl?.trim() || row?.base_url || ''
+  const model = input.model?.trim() || row?.default_model || DEFAULT_OPENAI_MODEL
+
+  if (!baseUrl) {
+    throw new Error('请先填写在线 API Base URL')
+  }
+
+  if (!apiKey) {
+    throw new Error('请先填写或保存在线 API Key')
+  }
+
+  return { apiKey, baseUrl, model }
+}
+
+export function getProviderRuntimeConfig(workspaceId: string, providerId = 'openai'): ProviderRuntimeConfig {
+  const config = resolveProviderRuntimeConfig({ workspaceId, providerId })
+  if (!config.baseUrl) {
     throw new Error('请先在系统设置中保存在线 API 配置')
   }
-
-  if (!row.encrypted_api_key) {
+  if (!config.apiKey) {
     throw new Error('请先在系统设置中保存在线 API Key')
   }
-
-  return {
-    apiKey: decryptSecret(row.encrypted_api_key),
-    baseUrl: row.base_url,
-    model: row.default_model
-  }
+  return config
 }

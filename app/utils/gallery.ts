@@ -2,6 +2,8 @@
 import type { BatchDetail, BatchRun, ResultFile, Task } from '~/types/gallery'
 
 export const COPIED_TASK_STORAGE_KEY = 'flowmatrix.copied-task'
+export const ONLINE_API_PRESET_ID = '__online_api__'
+
 type Translate = (key: string, params?: Record<string, unknown>) => string
 
 export function visibleInputParams(inputParams: Record<string, unknown>) {
@@ -22,6 +24,10 @@ export function isVideoResult(result: Pick<ResultFile, 'outputType' | 'mimeType'
 
 export function isAudioResult(result: Pick<ResultFile, 'outputType' | 'mimeType'>) {
   return result.outputType === 'audio' || result.mimeType?.startsWith('audio/')
+}
+
+export function isOnlineApiPreset(presetId: string | null | undefined) {
+  return presetId === ONLINE_API_PRESET_ID
 }
 
 export function resultKindLabel(result: Pick<ResultFile, 'outputType' | 'mimeType'>, t: Translate) {

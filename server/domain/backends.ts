@@ -2,7 +2,7 @@
 import { randomUUID } from 'node:crypto'
 import { getSqlite } from '../infrastructure/db/sqlite'
 import * as comfyui from '../infrastructure/comfyui/client'
-import { getOnlineProvider } from '../infrastructure/providers/registry'
+import { getOnlineProvider, normalizeProviderId } from '../infrastructure/providers/registry'
 import { getProviderRuntimeConfig } from '../infrastructure/providers/settings'
 import type { BackendScheduleMode, BackendScheduleDecision, ModelSignature } from '../../shared/types/app'
 
@@ -178,7 +178,7 @@ export async function testBackendConnection(id: string): Promise<{ ok: boolean; 
   const backend = getBackend(id)
   if (!backend) return { ok: false, error: 'Backend not found' }
   if (backend.type === 'provider') {
-    const providerId = backend.endpoint.trim() || 'openai'
+    const providerId = normalizeProviderId(backend.endpoint)
     const now = Date.now()
     try {
       const provider = getOnlineProvider(providerId)

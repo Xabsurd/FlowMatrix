@@ -9,6 +9,7 @@ import {
   canceledCount,
   COPIED_TASK_STORAGE_KEY,
   failedCount,
+  isOnlineApiPreset,
   formatDuration,
   formatSize,
   isImageResult,
@@ -60,6 +61,10 @@ async function fetchDetail() {
 
 function copyTaskToRun(task: Task) {
   if (!import.meta.client) return
+  if (isOnlineApiPreset(task.presetId)) {
+    ElMessage.info(t('gallery.onlineCopyUnavailable'))
+    return
+  }
   sessionStorage.setItem(COPIED_TASK_STORAGE_KEY, JSON.stringify({
     presetId: task.presetId,
     inputParams: Object.fromEntries(visibleInputParams(task.inputParams))

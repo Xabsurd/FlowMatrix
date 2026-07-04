@@ -8,6 +8,7 @@ import {
   batchTitle,
   completedCount,
   COPIED_TASK_STORAGE_KEY,
+  isOnlineApiPreset,
   statusLabel,
   statusType,
   visibleInputParams
@@ -79,6 +80,10 @@ async function copyBatchFirstTask(batch: BatchRun) {
     // Collect all unique values per parameter across all tasks
     const firstTask = tasks[0]!
     const presetId = firstTask.presetId
+    if (isOnlineApiPreset(presetId)) {
+      ElMessage.info(t('gallery.onlineCopyUnavailable'))
+      return
+    }
     const allInputParams: Record<string, unknown[]> = {}
     for (const task of tasks) {
       for (const [key, value] of visibleInputParams(task.inputParams)) {

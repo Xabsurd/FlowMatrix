@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { ElMessage } from 'element-plus'
 import type { BatchDetail, BatchRun, ResultFile, ResultsResponse } from '~/types/gallery'
-import { batchSubtitle, batchTitle } from '~/utils/gallery'
+import { batchSubtitle, batchTitle, isOnlineApiPreset } from '~/utils/gallery'
 
 const route = useRoute()
 const { t, locale } = useI18n()
@@ -33,7 +33,7 @@ const runtimeParamOrder = computed(() => {
 async function fetchBatchMeta() {
   const detail = await $fetch<BatchDetail>(`/api/v1/batch/${batchId.value}?taskLimit=1&taskOffset=0`)
   batch.value = detail
-  preset.value = detail.presetId
+  preset.value = detail.presetId && !isOnlineApiPreset(detail.presetId)
     ? await $fetch<PresetDetail>(`/api/v1/presets/${detail.presetId}`)
     : null
 }

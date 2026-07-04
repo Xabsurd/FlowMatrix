@@ -22,8 +22,11 @@ const providerForm = reactive({
 
 const saving = ref(false)
 const testing = ref(false)
+const loadingModels = ref(false)
 const providerStatus = ref('')
 const hasSavedApiKey = ref(false)
+const providerModels = ref<string[]>([])
+let providerModelTimer: ReturnType<typeof setTimeout> | undefined
 
 const enabledLocales = computed(() => appLocales.filter((item) => item.enabled))
 const enabledThemes = computed(() => appThemes.filter((item) => item.enabled))
@@ -55,6 +58,40 @@ async function loadProviderSettings() {
   providerForm.model = settings.defaultModel
   providerForm.apiKey = ''
   hasSavedApiKey.value = settings.hasApiKey
+  if (settings.hasApiKey) void fetchProviderModels(true)
+}
+
+async function fetchProviderModels(silent = false) {
+  if (!providerForm.baseUrl.trim()) return
+  if (!providerForm.apiKey.trim() && !hasSavedApiKey.value) {
+    if (!silent) providerStatus.value = t('settings.apiKeyPlaceholder')
+    return
+  }
+
+  loadingModels.value = true
+  if (!silent) providerStatus.value = ''
+
+  try {
+    const result = await $fetch<{ models: string[] }>('/api/providers/openai/models', {
+      method: 'POST',
+      body: {
+        baseUrl: providerForm.baseUrl,
+        model: providerForm.model,
+        apiKey: providerForm.apiKey
+      }
+    })
+    providerModels.value = result.models
+    if (!providerForm.model || !providerModels.value.includes(providerForm.model)) {
+      providerForm.model = providerModels.value[0] || ''
+    }
+    providerStatus.value = providerModels.value.length
+      ? t('settings.providerModelsLoaded', { count: providerModels.value.length })
+      : t('settings.providerModelsEmpty')
+  } catch (error) {
+    if (!silent) providerStatus.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    loadingModels.value = false
+  }
 }
 
 async function saveProviderSettings() {
@@ -62,6 +99,10 @@ async function saveProviderSettings() {
   providerStatus.value = ''
 
   try {
+    if (!providerForm.model) {
+      await fetchProviderModels(false)
+    }
+
     const settings = await $fetch<{
       hasApiKey: boolean
     }>('/api/providers/openai/settings', {
@@ -98,6 +139,13 @@ async function testProvider() {
     testing.value = false
   }
 }
+
+watch(() => [providerForm.baseUrl, providerForm.apiKey], () => {
+  if (providerModelTimer) clearTimeout(providerModelTimer)
+  providerModelTimer = setTimeout(() => {
+    void fetchProviderModels(true)
+  }, 700)
+})
 
 onMounted(() => {
   void loadProviderSettings()
@@ -177,7 +225,25 @@ onMounted(() => {
             <ElInput v-model="providerForm.baseUrl" placeholder="https://api.openai.com/v1" />
           </ElFormItem>
           <ElFormItem :label="t('providers.model')">
-            <ElInput v-model="providerForm.model" placeholder="gpt-image-1" />
+            <div class="model-picker">
+              <ElSelect
+                v-model="providerForm.model"
+                filterable
+                :loading="loadingModels"
+                :placeholder="t('settings.providerModelPlaceholder')"
+                style="width: 100%"
+              >
+                <ElOption
+                  v-for="model in providerModels"
+                  :key="model"
+                  :label="model"
+                  :value="model"
+                />
+              </ElSelect>
+              <ElButton :loading="loadingModels" @click="fetchProviderModels(false)">
+                {{ t('settings.fetchProviderModels') }}
+              </ElButton>
+            </div>
           </ElFormItem>
         </div>
 
@@ -278,6 +344,12 @@ onMounted(() => {
   display: grid;
   gap: 16px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.model-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
 }
 
 .actions {

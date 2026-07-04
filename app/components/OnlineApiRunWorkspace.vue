@@ -31,7 +31,25 @@
 
       <div class="online-grid">
         <ElFormItem :label="$t('onlineRun.model')">
-          <ElInput v-model.trim="form.model" :placeholder="$t('onlineRun.modelPlaceholder')" />
+          <div class="model-picker">
+            <ElSelect
+              v-model="form.model"
+              filterable
+              :loading="loadingModels"
+              :placeholder="$t('onlineRun.modelPlaceholder')"
+              style="width: 100%"
+            >
+              <ElOption
+                v-for="model in providerModels"
+                :key="model"
+                :label="model"
+                :value="model"
+              />
+            </ElSelect>
+            <ElButton :loading="loadingModels" @click="fetchProviderModels(false)">
+              {{ $t('settings.fetchProviderModels') }}
+            </ElButton>
+          </div>
         </ElFormItem>
         <ElFormItem :label="$t('onlineRun.size')">
           <ElSelect v-model="form.size" style="width: 100%">
@@ -132,6 +150,9 @@ interface RuntimeAsset {
 const { t } = useI18n()
 const backends = ref<Backend[]>([])
 const submitting = ref(false)
+const loadingModels = ref(false)
+const providerModels = ref<string[]>([])
+const hasSavedApiKey = ref(false)
 const selectedFiles = ref<File[]>([])
 const fileInputRef = ref<HTMLInputElement>()
 
@@ -171,6 +192,45 @@ watch(providerBackends, (items) => {
 
 async function fetchBackends() {
   backends.value = await $fetch<Backend[]>('/api/v1/backends')
+}
+
+async function loadProviderSettings() {
+  const settings = await $fetch<{
+    defaultModel: string
+    hasApiKey: boolean
+  }>('/api/providers/openai/settings')
+
+  hasSavedApiKey.value = settings.hasApiKey
+  form.model = settings.defaultModel || form.model
+  if (settings.hasApiKey) void fetchProviderModels(true)
+}
+
+async function fetchProviderModels(silent = false) {
+  if (!hasSavedApiKey.value) {
+    if (!silent) ElMessage.warning(t('settings.apiKeyPlaceholder'))
+    return
+  }
+
+  loadingModels.value = true
+  try {
+    const result = await $fetch<{ models: string[] }>('/api/providers/openai/models', {
+      method: 'POST',
+      body: { model: form.model }
+    })
+    providerModels.value = result.models
+    if (!form.model || !providerModels.value.includes(form.model)) {
+      form.model = providerModels.value[0] || ''
+    }
+    if (!silent) {
+      ElMessage.success(providerModels.value.length
+        ? t('settings.providerModelsLoaded', { count: providerModels.value.length })
+        : t('settings.providerModelsEmpty'))
+    }
+  } catch (error) {
+    if (!silent) ElMessage.error(error instanceof Error ? error.message : String(error))
+  } finally {
+    loadingModels.value = false
+  }
 }
 
 function openFilePicker() {
@@ -243,7 +303,10 @@ function backendOptionLabel(backend: Backend) {
   return `${backend.name} · ${state}`
 }
 
-onMounted(fetchBackends)
+onMounted(() => {
+  void fetchBackends()
+  void loadProviderSettings()
+})
 </script>
 
 <style scoped>
@@ -285,6 +348,12 @@ onMounted(fetchBackends)
 
 .online-grid :deep(.el-form-item) {
   margin-bottom: 0;
+}
+
+.model-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
 }
 
 .image-groups {
@@ -348,6 +417,7 @@ onMounted(fetchBackends)
 @media (max-width: 900px) {
   .fm-panel-heading,
   .online-grid,
+  .model-picker,
   .run-summary {
     grid-template-columns: 1fr;
   }

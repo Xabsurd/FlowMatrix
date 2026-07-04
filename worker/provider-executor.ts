@@ -6,13 +6,12 @@ import { getSqlite } from '../server/infrastructure/db/sqlite'
 import { selectBackend, updateBackendLoad } from '../server/domain/backends'
 import { getPreset, type NodeParamMapping } from '../server/domain/presets'
 import { updateTaskStatus, incrementBatchProgress } from '../server/domain/batch'
-import { getOnlineProvider } from '../server/infrastructure/providers/registry'
+import { getOnlineProvider, normalizeProviderId } from '../server/infrastructure/providers/registry'
 import { getProviderRuntimeConfig } from '../server/infrastructure/providers/settings'
 import type { BackendScheduleMode } from '../shared/types/app'
 import type { GenerateImageInput, ProviderImageArtifact } from '../server/infrastructure/providers/types'
 
 const OUTPUT_DIR = './data/outputs'
-const PROVIDER_ID_FALLBACK = 'openai'
 
 export async function executeProviderTask(taskId: string): Promise<void> {
   const db = getSqlite()
@@ -81,10 +80,6 @@ export async function executeProviderTask(taskId: string): Promise<void> {
   }
 }
 
-function normalizeProviderId(endpoint: string) {
-  const value = endpoint.trim().toLowerCase()
-  return value && !value.startsWith('http') ? value : PROVIDER_ID_FALLBACK
-}
 
 function buildDirectImageInput(inputParams: Record<string, unknown>, defaultModel: string): GenerateImageInput {
   const prompt = typeof inputParams.prompt === 'string' ? inputParams.prompt.trim() : ''
