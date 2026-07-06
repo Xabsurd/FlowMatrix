@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { writeFileSync, mkdirSync, existsSync, readFileSync } from 'node:fs'
+import { writeFileSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { getSqlite } from '../server/infrastructure/db/sqlite'
@@ -8,10 +8,10 @@ import { getWorkflow } from '../server/domain/workflows'
 import { getPreset } from '../server/domain/presets'
 import { updateTaskStatus, incrementBatchProgress } from '../server/domain/batch'
 import * as comfyui from '../server/infrastructure/comfyui/client'
+import { ensureBatchImageOutputDir, sanitizeOutputFileName } from '../server/infrastructure/storage/outputs'
 import type { BackendScheduleMode } from '../shared/types/app'
 
 const POLL_INTERVAL_MS = 2000
-const OUTPUT_DIR = './data/outputs'
 
 export async function executeComfyUITask(taskId: string): Promise<void> {
   const db = getSqlite()
@@ -128,9 +128,11 @@ export async function executeComfyUITask(taskId: string): Promise<void> {
     throw new Error(`ComfyUI error: ${errorMsg}`)
   }
 
-  if (!existsSync(OUTPUT_DIR)) mkdirSync(OUTPUT_DIR, { recursive: true })
-  const taskOutputDir = join(OUTPUT_DIR, taskId)
-  if (!existsSync(taskOutputDir)) mkdirSync(taskOutputDir, { recursive: true })
+  const batch = db.prepare('SELECT created_at FROM batch_runs WHERE id = ?').get(batchRunId) as Record<string, unknown> | undefined
+  const imageOutputDir = ensureBatchImageOutputDir({
+    batchRunId,
+    createdAt: Number(batch?.created_at || Date.now())
+  })
 
   const results: Array<{ filename: string; path: string; type: string; size: number }> = []
   const enabledOutputNodes = new Set((preset?.outputNodes || [])
@@ -144,8 +146,8 @@ export async function executeComfyUITask(taskId: string): Promise<void> {
       for (let i = 0; i < output.images.length; i++) {
         const img = output.images[i]
         const buffer = await comfyui.getImage(endpoint, img.filename, img.subfolder, img.type)
-        const filename = `${nodeId}_${i}_${img.filename}`
-        const filePath = join(taskOutputDir, filename)
+        const filename = sanitizeOutputFileName(`${taskId}_${nodeId}_${i}_${img.filename}`)
+        const filePath = join(imageOutputDir, filename)
         writeFileSync(filePath, buffer)
 
         const resultId = randomUUID()

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { writeFileSync, mkdirSync, existsSync, readFileSync } from 'node:fs'
+import { writeFileSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { getSqlite } from '../server/infrastructure/db/sqlite'
@@ -8,10 +8,9 @@ import { getPreset, type NodeParamMapping } from '../server/domain/presets'
 import { updateTaskStatus, incrementBatchProgress } from '../server/domain/batch'
 import { getOnlineProvider, normalizeProviderId } from '../server/infrastructure/providers/registry'
 import { getProviderRuntimeConfig } from '../server/infrastructure/providers/settings'
+import { ensureBatchImageOutputDir, sanitizeOutputFileName } from '../server/infrastructure/storage/outputs'
 import type { BackendScheduleMode } from '../shared/types/app'
 import type { GenerateImageInput, ProviderImageArtifact } from '../server/infrastructure/providers/types'
-
-const OUTPUT_DIR = './data/outputs'
 
 export async function executeProviderTask(taskId: string): Promise<void> {
   const db = getSqlite()
@@ -212,18 +211,20 @@ async function persistProviderArtifacts(input: {
   artifacts: ProviderImageArtifact[]
 }) {
   if (!input.artifacts.length) throw new Error('在线 API 未返回图片结果')
-  if (!existsSync(OUTPUT_DIR)) mkdirSync(OUTPUT_DIR, { recursive: true })
-  const taskOutputDir = join(OUTPUT_DIR, input.taskId)
-  if (!existsSync(taskOutputDir)) mkdirSync(taskOutputDir, { recursive: true })
 
   const db = getSqlite()
+  const batch = db.prepare('SELECT created_at FROM batch_runs WHERE id = ?').get(input.batchRunId) as Record<string, unknown> | undefined
+  const imageOutputDir = ensureBatchImageOutputDir({
+    batchRunId: input.batchRunId,
+    createdAt: Number(batch?.created_at || Date.now())
+  })
   const outputs: Array<{ filename: string; path: string; type: string; size: number }> = []
 
   for (const artifact of input.artifacts) {
     const buffer = await artifactToBuffer(artifact)
     const extension = extensionForMime(artifact.mimeType)
-    const filename = `provider_${artifact.index}.${extension}`
-    const filePath = join(taskOutputDir, filename)
+    const filename = sanitizeOutputFileName(`${input.taskId}_provider_${artifact.index}.${extension}`)
+    const filePath = join(imageOutputDir, filename)
     writeFileSync(filePath, buffer)
 
     db.prepare(`

@@ -2,6 +2,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve, normalize } from 'node:path'
 import { getResult } from '../../../../domain/results'
+import { getOutputStorageRoot } from '../../../../infrastructure/storage/outputs'
 
 export default defineEventHandler((event) => {
   const id = getRouterParam(event, 'id')!
@@ -12,13 +13,15 @@ export default defineEventHandler((event) => {
     throw createError({ statusCode: 400, message: 'Only local files can be served directly' })
   }
 
-  const rootDir = resolve(process.cwd(), './data/outputs')
+  const allowedRoots = [
+    getOutputStorageRoot(),
+    resolve(process.cwd(), './data/outputs')
+  ]
   const filePath = resolve(process.cwd(), result.storageKey)
   
-  const normalizedRoot = normalize(rootDir)
   const normalizedFile = normalize(filePath)
   
-  if (!normalizedFile.startsWith(normalizedRoot)) {
+  if (!allowedRoots.some(root => normalizedFile.startsWith(normalize(root)))) {
     throw createError({ statusCode: 403, message: 'Access denied' })
   }
 

@@ -13,7 +13,9 @@
       <section class="fm-config-panel fm-card">
         <div class="fm-panel-heading">
           <span>{{ $t('run.config') }}</span>
-          <ElTag v-if="selectedPreset" size="small" effect="plain">{{ scheduleModeLabel(selectedPreset.scheduleMode) }}</ElTag>
+          <div class="fm-panel-actions">
+            <ElButton v-if="embedded" type="primary" :loading="submitting" @click="startRun">{{ $t('run.start') }}</ElButton>
+          </div>
         </div>
 
         <ElForm label-position="top" class="fm-config-form">
@@ -208,16 +210,6 @@ function backendOptionLabel(backend: Backend) {
   return `${backend.name} · ${state}`
 }
 
-function scheduleModeLabel(mode: string) {
-  const labels: Record<string, string> = {
-    'idle-first': t('run.scheduleIdleFirst'),
-    'least-queue': t('run.scheduleLeastQueue'),
-    'resource-match': t('run.scheduleResourceMatch'),
-    smart: t('run.scheduleSmart')
-  }
-  return labels[mode] || mode
-}
-
 function readCopiedTask() {
   if (!import.meta.client) return null
   const raw = sessionStorage.getItem(COPIED_TASK_STORAGE_KEY)
@@ -286,6 +278,14 @@ onMounted(() => {
 .fm-panel-heading small {
   color: var(--fm-muted);
   font-size: 12px;
+}
+
+.fm-panel-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
 }
 
 .fm-config-form {
@@ -403,6 +403,11 @@ onMounted(() => {
 
   .fm-panel-heading {
     align-items: flex-start;
+  }
+
+  .fm-panel-actions {
+    width: 100%;
+    justify-content: space-between;
   }
 
   .fm-preset-summary {
