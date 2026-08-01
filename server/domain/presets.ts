@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { randomUUID } from 'node:crypto'
 import { getSqlite } from '../infrastructure/db/sqlite'
+import { inferComfyResourceType } from '../../shared/utils/model-resources'
 
 export interface CallPresetRow {
   id: string
@@ -25,6 +26,7 @@ export interface NodeParamMapping {
   inputName: string
   inferredType: string // STRING | INT | FLOAT | BOOLEAN | MODEL | SEED | JSON | IMAGE | FILE
   controlType: string // text | textarea | number | slider | switch | select | lora-select | seed-input | file-upload | json-editor
+  resourceType?: string
   runtimeInput?: boolean
   defaultValue?: unknown
   options?: unknown[]
@@ -161,16 +163,20 @@ export function deletePreset(id: string): boolean {
 export function inferParamType(nodeType: string, inputName: string, inputSpec: unknown): {
   inferredType: string
   controlType: string
+  resourceType?: string
   options?: unknown[]
 } {
   // Check by node type + input name first for well-known ComfyUI nodes
   const wellKnown = WELL_KNOWN_PARAMS[`${nodeType}.${inputName}`]
-  if (wellKnown) return wellKnown
   const modelResourceType = inferModelResourceType(nodeType, inputName)
+  if (wellKnown) return modelResourceType
+    ? { ...wellKnown, resourceType: modelResourceType }
+    : wellKnown
   if (modelResourceType) {
     return {
       inferredType: 'MODEL',
-      controlType: modelResourceType === 'lora' ? 'lora-select' : 'select'
+      controlType: modelResourceType === 'lora' ? 'lora-select' : 'select',
+      resourceType: modelResourceType
     }
   }
   if (inputName === 'value' && /^Primitive/i.test(nodeType)) return inferPrimitiveParamType(nodeType)
@@ -202,16 +208,7 @@ export function inferParamType(nodeType: string, inputName: string, inputSpec: u
 }
 
 function inferModelResourceType(nodeType: string, inputName: string) {
-  const lowerNodeType = nodeType.toLowerCase()
-  const lowerInputName = inputName.toLowerCase()
-  if (lowerInputName === 'lora_name') return 'lora'
-  if (/^(ckpt|checkpoint)_?name$/.test(lowerInputName) || /checkpointloader/.test(lowerNodeType)) return 'checkpoint'
-  if (lowerInputName === 'vae_name' || lowerNodeType.includes('vaeloader')) return 'vae'
-  if (lowerInputName === 'unet_name' || lowerInputName === 'diffusion_model_name' || lowerNodeType.includes('unetloader')) return 'unet'
-  if (/^control_?net_?name$/.test(lowerInputName) || lowerNodeType.includes('controlnetloader')) return 'controlnet'
-  if (/^upscale(r)?_?name$/.test(lowerInputName) || lowerNodeType.includes('upscalemodelloader')) return 'upscale'
-  if (lowerInputName === 'embedding_name') return 'embedding'
-  return ''
+  return inferComfyResourceType(nodeType, inputName)
 }
 
 function inferPrimitiveParamType(nodeType: string) {

@@ -2,6 +2,9 @@
 export default defineNuxtConfig({
   compatibilityDate: '2026-06-18',
   devtools: { enabled: true },
+  devServer: {
+    port: 5178
+  },
   app: {
     head: {
       link: [

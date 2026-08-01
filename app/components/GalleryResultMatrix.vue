@@ -1,6 +1,7 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <script setup lang="ts">
 import { Download, FullScreen, InfoFilled, RefreshLeft, RefreshRight, ZoomIn, ZoomOut } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import type { ResultFile, ResultFilterGroup } from '~/types/gallery'
 import {
   formatSize,
@@ -34,6 +35,7 @@ const rowAxisKey = ref('')
 const columnAxisKey = ref('')
 const resultInfoVisible = ref(false)
 const activePreviewResult = ref<ResultFile | null>(null)
+const exportingMatrix = ref(false)
 
 type MatrixFilter = {
   group: ResultFilterGroup
@@ -101,7 +103,7 @@ const filterGroups = computed<ResultFilterGroup[]>(() => {
     .sort((a, b) => compareParamKeys(a.key, b.key))
 })
 
-const selectedRowGroup = computed(() => findGroup(rowAxisKey.value) || filterGroups.value[0])
+const selectedRowGroup = computed(() => findGroup(rowAxisKey.value) || (filterGroups.value.length > 1 ? filterGroups.value[0] : undefined))
 const selectedColumnGroup = computed(() => findGroup(columnAxisKey.value) || filterGroups.value.find(group => group.key !== selectedRowGroup.value?.key))
 const visibleRows = computed(() => orderedGroupValues(selectedRowGroup.value).filter(value => !value.hidden))
 const visibleColumns = computed(() => orderedGroupValues(selectedColumnGroup.value).filter(value => !value.hidden))
@@ -167,9 +169,14 @@ watch(filterGroups, (groups) => {
     columnAxisKey.value = ''
     return
   }
-  if (!groups.some(group => group.key === rowAxisKey.value)) rowAxisKey.value = groups[0]?.key || ''
-  if (!groups.some(group => group.key === columnAxisKey.value) || columnAxisKey.value === rowAxisKey.value) {
-    columnAxisKey.value = groups.find(group => group.key !== rowAxisKey.value)?.key || ''
+  if (groups.length === 1) {
+    columnAxisKey.value = groups[0]?.key || ''
+    rowAxisKey.value = ''
+    return
+  }
+  if (!groups.some(group => group.key === columnAxisKey.value)) columnAxisKey.value = groups[1]?.key || groups[0]?.key || ''
+  if (!groups.some(group => group.key === rowAxisKey.value) || rowAxisKey.value === columnAxisKey.value) {
+    rowAxisKey.value = groups.find(group => group.key !== columnAxisKey.value)?.key || ''
   }
 }, { immediate: true })
 
@@ -369,6 +376,208 @@ function jumpPreviewToIndex(targetIndex: number) {
   activePreviewIndex.value = targetIndex
 }
 
+async function exportMatrixImage() {
+  if (!visibleResults.value.length || exportingMatrix.value) return
+  exportingMatrix.value = true
+  try {
+    const image = await renderMatrixImage()
+    downloadDataUrl(image, `flowmatrix-${Date.now()}.png`)
+    ElMessage.success(t('galleryMatrix.exportSuccess'))
+  } catch (error: unknown) {
+    ElMessage.error(error instanceof Error ? error.message : t('galleryMatrix.exportFailed'))
+  } finally {
+    exportingMatrix.value = false
+  }
+}
+
+async function renderMatrixImage() {
+  const rowHeaderWidth = 180
+  const cellWidth = cellMediaSize.value
+  const mediaHeight = Math.round(cellMediaSize.value * 4 / 3)
+  const headerHeight = 72
+  const sectionGap = 24
+  const sectionHeadHeight = 38
+  const padding = 24
+  const scale = 2
+  const width = rowHeaderWidth + matrixColumns.value.length * cellWidth
+  const sectionHeights = matrixSections.value.map(section =>
+    (section.filters.length ? sectionHeadHeight : 0) + headerHeight + section.rows.length * mediaHeight
+  )
+  const height = sectionHeights.reduce((total, value) => total + value, 0) + sectionGap * Math.max(0, matrixSections.value.length - 1)
+  const maxCanvasSide = 32767
+  const drawScale = Math.min(scale, maxCanvasSide / Math.max(width + padding * 2, height + padding * 2))
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.max(1, Math.floor((width + padding * 2) * drawScale))
+  canvas.height = Math.max(1, Math.floor((height + padding * 2) * drawScale))
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Canvas is not available')
+
+  ctx.scale(drawScale, drawScale)
+  ctx.fillStyle = readCssColor('--fm-bg', '#0f1722')
+  ctx.fillRect(0, 0, width + padding * 2, height + padding * 2)
+
+  const imageCache = new Map<string, HTMLImageElement | null>()
+  let y = padding
+  for (const section of matrixSections.value) {
+    if (section.filters.length) {
+      drawSectionTitle(ctx, section.filters, padding, y, width, sectionHeadHeight)
+      y += sectionHeadHeight
+    }
+
+    drawTableHeader(ctx, padding, y, rowHeaderWidth, cellWidth, headerHeight)
+    y += headerHeight
+
+    for (const row of section.rows) {
+      await drawMatrixRow(ctx, row, padding, y, rowHeaderWidth, cellWidth, mediaHeight, imageCache)
+      y += mediaHeight
+    }
+
+    y += sectionGap
+  }
+
+  return canvas.toDataURL('image/png')
+}
+
+function drawTableHeader(ctx: CanvasRenderingContext2D, x: number, y: number, rowHeaderWidth: number, cellWidth: number, height: number) {
+  drawRect(ctx, x, y, rowHeaderWidth, height, readCssColor('--fm-panel-strong', '#182332'), readCssColor('--fm-border', '#2a3a4c'))
+  drawTextBlock(ctx, selectedRowGroup.value?.label || t('galleryMatrix.parameter'), x + 12, y + 14, rowHeaderWidth - 24, readCssColor('--fm-text', '#e5edf5'), 13, true)
+  matrixColumns.value.forEach((column, index) => {
+    const cellX = x + rowHeaderWidth + index * cellWidth
+    drawRect(ctx, cellX, y, cellWidth, height, readCssColor('--fm-panel-strong', '#182332'), readCssColor('--fm-border', '#2a3a4c'))
+    if (selectedColumnGroup.value) {
+      drawTextBlock(ctx, selectedColumnGroup.value.label, cellX + 10, y + 10, cellWidth - 20, readCssColor('--fm-muted', '#94a3b8'), 11, false)
+    }
+    drawTextBlock(ctx, column.label, cellX + 10, y + 30, cellWidth - 20, readCssColor('--fm-text', '#e5edf5'), 12, true)
+  })
+}
+
+async function drawMatrixRow(
+  ctx: CanvasRenderingContext2D,
+  row: Record<string, unknown>,
+  x: number,
+  y: number,
+  rowHeaderWidth: number,
+  cellWidth: number,
+  height: number,
+  imageCache: Map<string, HTMLImageElement | null>
+) {
+  drawRect(ctx, x, y, rowHeaderWidth, height, readCssColor('--fm-panel-muted', '#121d29'), readCssColor('--fm-border', '#2a3a4c'))
+  if (row._rowGroupLabel) drawTextBlock(ctx, String(row._rowGroupLabel), x + 12, y + 14, rowHeaderWidth - 24, readCssColor('--fm-muted', '#94a3b8'), 11, false)
+  drawTextBlock(ctx, String(row._rowLabel), x + 12, y + 36, rowHeaderWidth - 24, readCssColor('--fm-text', '#e5edf5'), 12, true)
+
+  for (const [index, column] of matrixColumns.value.entries()) {
+    const cellX = x + rowHeaderWidth + index * cellWidth
+    drawRect(ctx, cellX, y, cellWidth, height, readCssColor('--fm-panel-muted', '#121d29'), readCssColor('--fm-border', '#2a3a4c'))
+    const items = (row[column.valueKey] as ResultFile[] | undefined) ?? []
+    if (!items.length) continue
+    await drawCellResults(ctx, items, cellX, y, cellWidth, height, imageCache)
+  }
+}
+
+async function drawCellResults(
+  ctx: CanvasRenderingContext2D,
+  results: ResultFile[],
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  imageCache: Map<string, HTMLImageElement | null>
+) {
+  const columns = Math.max(1, Math.ceil(Math.sqrt(results.length)))
+  const rows = Math.max(1, Math.ceil(results.length / columns))
+  const itemWidth = width / columns
+  const itemHeight = height / rows
+
+  for (const [index, result] of results.entries()) {
+    const itemX = x + (index % columns) * itemWidth
+    const itemY = y + Math.floor(index / columns) * itemHeight
+    if (isImageResult(result)) {
+      const image = await loadResultImage(resultUrl(result), imageCache)
+      if (image) {
+        drawCoverImage(ctx, image, itemX, itemY, itemWidth, itemHeight)
+        continue
+      }
+    }
+    drawRect(ctx, itemX, itemY, itemWidth, itemHeight, readCssColor('--fm-panel', '#101826'), readCssColor('--fm-border', '#2a3a4c'))
+    drawTextBlock(ctx, resultKindLabel(result, t), itemX + 8, itemY + itemHeight / 2 - 8, itemWidth - 16, readCssColor('--fm-muted', '#94a3b8'), 12, true)
+  }
+}
+
+function drawSectionTitle(ctx: CanvasRenderingContext2D, filters: MatrixFilter[], x: number, y: number, width: number, height: number) {
+  drawRect(ctx, x, y, width, height - 8, readCssColor('--fm-panel-muted', '#121d29'), readCssColor('--fm-border', '#2a3a4c'))
+  const label = filters.map(filter => `${filter.group.label}: ${filter.value.label}`).join(' / ')
+  drawTextBlock(ctx, label, x + 12, y + 9, width - 24, readCssColor('--fm-text', '#e5edf5'), 13, true)
+}
+
+function drawRect(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, fill: string, stroke: string) {
+  ctx.fillStyle = fill
+  ctx.fillRect(x, y, width, height)
+  ctx.strokeStyle = stroke
+  ctx.lineWidth = 1
+  ctx.strokeRect(x, y, width, height)
+}
+
+function drawTextBlock(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, maxWidth: number, color: string, size: number, bold: boolean) {
+  ctx.fillStyle = color
+  ctx.font = `${bold ? '700 ' : ''}${size}px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`
+  ctx.textBaseline = 'top'
+  const value = ellipsizeText(ctx, text, maxWidth)
+  ctx.fillText(value, x, y)
+}
+
+function ellipsizeText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number) {
+  if (ctx.measureText(text).width <= maxWidth) return text
+  let value = text
+  while (value.length > 1 && ctx.measureText(`${value}...`).width > maxWidth) value = value.slice(0, -1)
+  return `${value}...`
+}
+
+function drawCoverImage(ctx: CanvasRenderingContext2D, image: HTMLImageElement, x: number, y: number, width: number, height: number) {
+  const sourceRatio = image.naturalWidth / image.naturalHeight
+  const targetRatio = width / height
+  let sourceWidth = image.naturalWidth
+  let sourceHeight = image.naturalHeight
+  let sourceX = 0
+  let sourceY = 0
+  if (sourceRatio > targetRatio) {
+    sourceWidth = sourceHeight * targetRatio
+    sourceX = (image.naturalWidth - sourceWidth) / 2
+  } else {
+    sourceHeight = sourceWidth / targetRatio
+    sourceY = (image.naturalHeight - sourceHeight) / 2
+  }
+  ctx.drawImage(image, sourceX, sourceY, sourceWidth, sourceHeight, x, y, width, height)
+}
+
+function loadResultImage(src: string, cache: Map<string, HTMLImageElement | null>) {
+  if (cache.has(src)) return Promise.resolve(cache.get(src) ?? null)
+  return new Promise<HTMLImageElement | null>((resolve) => {
+    const image = new Image()
+    image.onload = () => {
+      cache.set(src, image)
+      resolve(image)
+    }
+    image.onerror = () => {
+      cache.set(src, null)
+      resolve(null)
+    }
+    image.src = src
+  })
+}
+
+function readCssColor(name: string, fallback: string) {
+  if (!import.meta.client) return fallback
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+  return value || fallback
+}
+
+function downloadDataUrl(dataUrl: string, fileName: string) {
+  const anchor = document.createElement('a')
+  anchor.href = dataUrl
+  anchor.download = fileName
+  anchor.click()
+}
+
 onMounted(() => {
   document.addEventListener('keydown', handlePreviewKeydown, true)
 })
@@ -380,9 +589,9 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="fm-stack">
-    <div v-if="filterGroups.length" class="matrix-config fm-card">
+    <div v-if="visibleResults.length" class="matrix-config fm-card">
       <div class="matrix-config-main">
-        <ElPopover placement="bottom-start" trigger="click" :width="320" popper-class="fm-filter-popper">
+        <ElPopover v-if="filterGroups.length" placement="bottom-start" trigger="click" :width="320" popper-class="fm-filter-popper">
           <template #reference>
             <ElButton class="matrix-config-button" :size="rowActionSize">
               {{ t('galleryMatrix.aggregateParam') }}
@@ -520,7 +729,10 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <ElButton v-if="hiddenValueKeys.length || hasCustomValueOrder" :size="rowActionSize" @click="restorePreset">{{ t('galleryMatrix.restorePreset') }}</ElButton>
+      <div class="matrix-config-actions">
+        <ElButton :size="rowActionSize" :icon="Download" :loading="exportingMatrix" @click="exportMatrixImage">{{ t('galleryMatrix.exportImage') }}</ElButton>
+        <ElButton v-if="hiddenValueKeys.length || hasCustomValueOrder" :size="rowActionSize" @click="restorePreset">{{ t('galleryMatrix.restorePreset') }}</ElButton>
+      </div>
     </div>
 
     <div v-if="visibleResults.length" class="matrix-section-list" :style="matrixStyleVars">
@@ -671,6 +883,14 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
   gap: 8px;
   min-width: 0;
+}
+
+.matrix-config-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .matrix-config-button {
@@ -1014,7 +1234,8 @@ video.matrix-media {
 
 @media (max-width: 760px) {
   .matrix-config,
-  .matrix-config-main {
+  .matrix-config-main,
+  .matrix-config-actions {
     align-items: flex-start;
     flex-direction: column;
   }

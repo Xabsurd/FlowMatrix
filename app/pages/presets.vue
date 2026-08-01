@@ -52,7 +52,13 @@
 
     <ElEmpty v-else-if="!loading" :description="t('presetsPage.empty')" />
 
-    <ElDialog v-model="showCreateDialog" :title="editingId ? t('presetsPage.editDialog') : t('presetsPage.createDialog')" width="860px">
+    <ElDialog
+      v-model="showCreateDialog"
+      :title="editingId ? t('presetsPage.editDialog') : t('presetsPage.createDialog')"
+      width="860px"
+      append-to-body
+      :before-close="confirmCloseDialog"
+    >
       <ElForm label-position="top">
         <ElFormItem :label="t('presetsPage.name')" required>
           <ElInput v-model="form.name" :placeholder="t('presetsPage.namePlaceholder')" />
@@ -108,11 +114,24 @@
             <ElButton type="primary" @click="addParam">{{ t('presetsPage.addParam') }}</ElButton>
           </div>
 
+          <div v-if="configuredParams.some(isModelConfiguredParam)" class="fm-model-resource-bar">
+            <div>
+              <strong>{{ t('presetsPage.modelResources') }}</strong>
+              <span>{{ t('presetsPage.modelResourcesHint', { count: presetResources.length, backends: resourceBackends.length }) }}</span>
+            </div>
+            <ElButton
+              :loading="syncingPresetResources"
+              :disabled="!resourceBackends.length"
+              @click="syncPresetResources">
+              {{ t('presetsPage.syncModelResources') }}
+            </ElButton>
+          </div>
+
           <div v-if="configuredParams.length" class="fm-param-list">
             <div v-for="(param, index) in configuredParams" :key="param.key" class="fm-param-row">
               <div class="fm-param-main">
-                <strong>{{ param.nodeType }}.{{ param.inputName }}</strong>
-                <small>{{ param.nodeId }} · {{ param.controlType }} · {{ param.runtimeInput ? t('presetsPage.runtimeVisible') : t('presetsPage.fixedWritten') }}</small>
+                <strong>{{ configuredParamLabel(param) }}</strong>
+                <small>{{ param.nodeType }} · {{ param.nodeId }} · {{ param.inputName }}</small>
               </div>
               <ElSwitch
                 v-model="param.runtimeInput"
@@ -129,8 +148,41 @@
                 <ElOption :label="t('presetsPage.integer')" value="INT" />
                 <ElOption :label="t('presetsPage.float')" value="FLOAT" />
               </ElSelect>
-              <span v-else class="fm-type-static">{{ typeLabel(param.inferredType) }}</span>
+              <span v-else class="fm-type-static">{{ configuredTypeLabel(param) }}</span>
+              <ElSelect
+                v-if="isModelConfiguredParam(param) && !param.runtimeInput"
+                v-model="param.defaultText"
+                class="fm-fixed-input"
+                filterable
+                clearable
+                popper-class="fm-resource-select-popper"
+                :loading="presetResourceLoading"
+                :placeholder="t('presetsPage.selectFixedModel', { type: modelResourceTypeLabel(param) })"
+                :no-data-text="t('presetsPage.noFixedModels', { type: modelResourceTypeLabel(param) })"
+              >
+                <ElOption
+                  v-for="resource in presetResourceOptions(param)"
+                  :key="resource.name"
+                  :label="resource.name"
+                  :value="resource.name">
+                  <div class="fm-resource-option" :class="{ 'is-selected': param.defaultText === resource.name }">
+                    <FmIcon
+                      class="fm-resource-option-check"
+                      :class="{ 'is-visible': param.defaultText === resource.name }"
+                      name="check"
+                      :size="16"
+                    />
+                    <strong :title="resource.name">{{ resource.name }}</strong>
+                    <span>
+                      {{ param.defaultText === resource.name
+                        ? t('runtime.selected')
+                        : presetResourceAvailability(resource) }}
+                    </span>
+                  </div>
+                </ElOption>
+              </ElSelect>
               <ElInput
+                v-else
                 v-model="param.defaultText"
                 :disabled="param.runtimeInput"
                 :placeholder="t('presetsPage.fixedValue')"
@@ -164,7 +216,8 @@
         </div>
       </ElForm>
       <template #footer>
-        <ElButton @click="showCreateDialog = false">{{ t('common.cancel') }}</ElButton>
+        <span v-if="isDialogDirty" class="fm-unsaved-hint">{{ t('common.unsavedChanges') }}</span>
+        <ElButton @click="requestCloseDialog">{{ t('common.cancel') }}</ElButton>
         <ElButton type="primary" :loading="saving" @click="savePreset">{{ editingId ? t('presetsPage.saveChanges') : t('presetsPage.savePreset') }}</ElButton>
       </template>
     </ElDialog>
@@ -173,6 +226,10 @@
 
 <script setup lang="ts">
 import { ElMessage, ElMessageBox } from 'element-plus'
+import {
+  getComfyResourceDefinition,
+  inferComfyResourceType
+} from '~~/shared/utils/model-resources'
 
 const { t } = useI18n()
 const { rowActionSize } = useUiPreferences()
@@ -209,6 +266,7 @@ interface NodeParam {
   inputName: string
   inferredType: string
   controlType: string
+  resourceType?: string
   runtimeInput?: boolean
   defaultValue?: unknown
   options?: unknown[]
@@ -230,15 +288,40 @@ interface Preset {
   outputNodes?: OutputNode[]
 }
 
+interface Backend {
+  id: string
+  name: string
+  type: string
+  enabled: boolean
+  paused?: boolean
+}
+
+interface BackendResource {
+  backendId: string
+  type: string
+  name: string
+}
+
+interface ModelResourceOption {
+  name: string
+  backendNames: string[]
+}
+
 const workflows = ref<Workflow[]>([])
 const presets = ref<Preset[]>([])
+const backends = ref<Backend[]>([])
+const presetResources = ref<BackendResource[]>([])
+const resourceBackends = ref<Backend[]>([])
 const configuredParams = ref<ConfiguredParam[]>([])
 const outputNodeDraft = reactive<Record<string, boolean>>({})
 const loading = ref(false)
 const saving = ref(false)
+const presetResourceLoading = ref(false)
+const syncingPresetResources = ref(false)
 const showCreateDialog = ref(false)
 const editingId = ref('')
 const hydratingForm = ref(false)
+const dialogBaseline = ref('')
 const form = reactive({
   name: '',
   workflowId: '',
@@ -265,6 +348,9 @@ const outputNodeOptions = computed(() => (selectedWorkflow.value?.parsedNodes ||
     title: node.title,
     enabled: outputNodeDraft[node.nodeId] ?? true
   })))
+const isDialogDirty = computed(() => Boolean(showCreateDialog.value)
+  && Boolean(dialogBaseline.value)
+  && dialogSnapshot() !== dialogBaseline.value)
 
 watch(() => form.workflowId, () => {
   if (hydratingForm.value) return
@@ -281,12 +367,14 @@ watch(() => draft.nodeKey, () => {
 async function fetchData() {
   loading.value = true
   try {
-    const [workflowRows, presetRows] = await Promise.all([
+    const [workflowRows, presetRows, backendRows] = await Promise.all([
       $fetch<Workflow[]>('/api/v1/workflows'),
-      $fetch<Preset[]>('/api/v1/presets')
+      $fetch<Preset[]>('/api/v1/presets'),
+      $fetch<Backend[]>('/api/v1/backends')
     ])
     workflows.value = workflowRows
     presets.value = presetRows
+    backends.value = backendRows
   } finally {
     loading.value = false
   }
@@ -308,6 +396,8 @@ function openCreateDialog() {
   draft.inputName = ''
   draft.runtimeInput = true
   showCreateDialog.value = true
+  captureDialogBaseline()
+  void fetchPresetResources()
 }
 
 function openEditDialog(preset: Preset) {
@@ -328,8 +418,43 @@ function openEditDialog(preset: Preset) {
   draft.inputName = ''
   draft.runtimeInput = true
   showCreateDialog.value = true
+  void fetchPresetResources()
   nextTick(() => {
     hydratingForm.value = false
+    dialogBaseline.value = dialogSnapshot()
+  })
+}
+
+function dialogSnapshot() {
+  return JSON.stringify({
+    form: { ...form },
+    params: configuredParams.value,
+    outputs: Object.entries(outputNodeDraft).sort(([a], [b]) => a.localeCompare(b))
+  })
+}
+
+function captureDialogBaseline() {
+  nextTick(() => {
+    dialogBaseline.value = dialogSnapshot()
+  })
+}
+
+async function confirmCloseDialog(done: () => void) {
+  if (!isDialogDirty.value || saving.value) {
+    done()
+    return
+  }
+  try {
+    await ElMessageBox.confirm(t('common.discardChangesConfirm'), t('common.unsavedChanges'), { type: 'warning' })
+    done()
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') throw error
+  }
+}
+
+function requestCloseDialog() {
+  void confirmCloseDialog(() => {
+    showCreateDialog.value = false
   })
 }
 
@@ -452,12 +577,15 @@ async function removePreset(preset: Preset) {
 
 function inferParam(nodeType: string, inputName: string, input: ParsedNodeInput) {
   const known = knownParams[`${nodeType}.${inputName}`]
-  if (known) return known
   const modelResourceType = resourceTypeForParam(nodeType, inputName)
+  if (known) return modelResourceType
+    ? { ...known, resourceType: modelResourceType }
+    : known
   if (modelResourceType) {
     return {
       inferredType: 'MODEL',
-      controlType: modelResourceType === 'lora' ? 'lora-select' : 'select'
+      controlType: modelResourceType === 'lora' ? 'lora-select' : 'select',
+      resourceType: modelResourceType
     }
   }
   if (isPrimitiveValueInput({ nodeType } as ParsedNode, inputName)) return inferPrimitiveParam(nodeType)
@@ -493,16 +621,93 @@ function isFileInput(inputName: string) {
 }
 
 function resourceTypeForParam(nodeType: string, inputName: string) {
-  const lowerNodeType = nodeType.toLowerCase()
-  const lowerInputName = inputName.toLowerCase()
-  if (lowerInputName === 'lora_name') return 'lora'
-  if (/^(ckpt|checkpoint)_?name$/.test(lowerInputName) || /checkpointloader/.test(lowerNodeType)) return 'checkpoint'
-  if (lowerInputName === 'vae_name' || lowerNodeType.includes('vaeloader')) return 'vae'
-  if (lowerInputName === 'unet_name' || lowerInputName === 'diffusion_model_name' || lowerNodeType.includes('unetloader')) return 'unet'
-  if (/^control_?net_?name$/.test(lowerInputName) || lowerNodeType.includes('controlnetloader')) return 'controlnet'
-  if (/^upscale(r)?_?name$/.test(lowerInputName) || lowerNodeType.includes('upscalemodelloader')) return 'upscale'
-  if (lowerInputName === 'embedding_name') return 'embedding'
-  return ''
+  return inferComfyResourceType(nodeType, inputName)
+}
+
+function isModelConfiguredParam(param: Pick<NodeParam, 'nodeType' | 'inputName' | 'inferredType' | 'resourceType'>) {
+  return param.inferredType === 'MODEL'
+    || Boolean(param.resourceType || resourceTypeForParam(param.nodeType, param.inputName))
+}
+
+function configuredParamLabel(param: ConfiguredParam) {
+  return isModelConfiguredParam(param)
+    ? modelResourceTypeLabel(param)
+    : `${param.nodeType}.${param.inputName}`
+}
+
+function configuredTypeLabel(param: ConfiguredParam) {
+  return isModelConfiguredParam(param) ? modelResourceTypeLabel(param) : typeLabel(param.inferredType)
+}
+
+function modelResourceTypeLabel(param: Pick<NodeParam, 'nodeType' | 'inputName' | 'resourceType'>) {
+  const type = param.resourceType || resourceTypeForParam(param.nodeType, param.inputName)
+  if (!type) return t('presetsPage.model')
+  const key = `runtime.resourceTypes.${type}`
+  const translated = t(key)
+  return translated === key ? getComfyResourceDefinition(type)?.label || type : translated
+}
+
+async function fetchPresetResources() {
+  if (presetResourceLoading.value) return
+  presetResourceLoading.value = true
+  try {
+    resourceBackends.value = backends.value.filter(backend =>
+      backend.type === 'comfyui' && backend.enabled && !backend.paused)
+    const rows = await Promise.all(resourceBackends.value.map(async (backend) => {
+      try {
+        return await $fetch<BackendResource[]>(`/api/v1/backends/${backend.id}/resources`)
+      } catch {
+        return []
+      }
+    }))
+    presetResources.value = rows.flat()
+  } finally {
+    presetResourceLoading.value = false
+  }
+}
+
+async function syncPresetResources() {
+  if (syncingPresetResources.value || !resourceBackends.value.length) return
+  syncingPresetResources.value = true
+  try {
+    const results = await Promise.all(resourceBackends.value.map(backend =>
+      $fetch<{ synced: number; errors: string[] }>(`/api/v1/backends/${backend.id}/resources/refresh`, { method: 'POST' })
+    ))
+    await fetchPresetResources()
+    const synced = results.reduce((total, result) => total + result.synced, 0)
+    ElMessage.success(t('presetsPage.modelResourcesSynced', { count: synced }))
+  } catch (error: unknown) {
+    ElMessage.error(error instanceof Error ? error.message : t('backends.syncFailed'))
+  } finally {
+    syncingPresetResources.value = false
+  }
+}
+
+function presetResourceOptions(param: ConfiguredParam) {
+  const type = param.resourceType || resourceTypeForParam(param.nodeType, param.inputName)
+  const backendNames = new Map(resourceBackends.value.map(backend => [backend.id, backend.name]))
+  const options = new Map<string, ModelResourceOption>()
+
+  for (const resource of presetResources.value) {
+    if (type && resource.type !== type) continue
+    const current = options.get(resource.name) || {
+      name: resource.name,
+      backendNames: []
+    }
+    const backendName = backendNames.get(resource.backendId)
+    if (backendName && !current.backendNames.includes(backendName)) current.backendNames.push(backendName)
+    options.set(resource.name, current)
+  }
+
+  return [...options.values()].sort((a, b) => a.name.localeCompare(b.name))
+}
+
+function presetResourceAvailability(resource: ModelResourceOption) {
+  if (resourceBackends.value.length <= 1) return resource.backendNames[0] || ''
+  return t('runtime.backendAvailability', {
+    available: resource.backendNames.length,
+    total: resourceBackends.value.length
+  })
 }
 
 function valueToText(value: unknown) {
@@ -584,6 +789,10 @@ onMounted(fetchData)
 .fm-section-heading strong { color: var(--fm-text); font-size: 14px; }
 .fm-section-heading span { color: var(--fm-muted); font-size: 12px; }
 .fm-builder-toolbar { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto auto; align-items: center; gap: 10px; }
+.fm-model-resource-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--fm-border); border-radius: var(--fm-radius); background: color-mix(in srgb, var(--fm-primary) 5%, var(--fm-panel-muted)); }
+.fm-model-resource-bar > div { display: grid; gap: 4px; min-width: 0; }
+.fm-model-resource-bar strong { color: var(--fm-text); font-size: 13px; }
+.fm-model-resource-bar span { color: var(--fm-muted); font-size: 12px; }
 .fm-param-list { display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow: auto; }
 .fm-param-row { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(104px, 132px) minmax(180px, 240px) auto; align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--fm-border); border-radius: var(--fm-radius); background: color-mix(in srgb, var(--fm-panel-muted) 72%, transparent); }
 .fm-param-main { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
@@ -591,6 +800,7 @@ onMounted(fetchData)
 .fm-param-main small { color: var(--fm-muted); overflow-wrap: anywhere; }
 .fm-type-select { min-width: 0; }
 .fm-type-static { min-width: 72px; color: var(--fm-muted); font-size: 12px; text-align: center; }
+.fm-unsaved-hint { margin-right: auto; color: var(--fm-warning); font-size: 12px; }
 .fm-fixed-input { min-width: 0; }
 .fm-output-builder { display: grid; gap: 12px; margin-top: 16px; }
 .fm-output-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
@@ -602,5 +812,6 @@ onMounted(fetchData)
   .fm-form-grid,
   .fm-builder-toolbar,
   .fm-param-row { grid-template-columns: 1fr; }
+  .fm-model-resource-bar { align-items: stretch; flex-direction: column; }
 }
 </style>

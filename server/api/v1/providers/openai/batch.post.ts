@@ -30,7 +30,7 @@ export default defineEventHandler(async (event) => {
   if (!backendId) throw createError({ statusCode: 400, message: '请选择在线 API 执行后端' })
 
   const backend = getBackend(backendId)
-  if (!backend || backend.workspaceId !== ctx.workspaceId || backend.type !== 'provider') {
+  if (!backend || backend.workspaceId !== ctx.workspaceId || (backend.type !== 'provider' && backend.type !== 'codex-cli')) {
     throw createError({ statusCode: 400, message: '指定的在线 API 后端不存在' })
   }
   if (!backend.enabled || backend.paused) {
@@ -58,7 +58,7 @@ export default defineEventHandler(async (event) => {
     actorId: ctx.actorId,
     name: body.name,
     backendId,
-    providerId: backend.endpoint || 'openai',
+    providerId: backend.type === 'codex-cli' ? 'gpt-image-2' : (backend.endpoint || 'openai'),
     mode,
     prompts,
     imageGroups,

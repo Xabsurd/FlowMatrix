@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <script setup lang="ts">
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import type { BatchDetail, ResultFile, Task } from '~/types/gallery'
 import {
   batchProgress,
@@ -31,21 +31,30 @@ const { rowActionSize } = useUiPreferences()
 const batchId = computed(() => String(route.params.id || ''))
 const detail = ref<BatchDetail | null>(null)
 const loading = ref(false)
+const refreshing = ref(false)
+const loadError = ref('')
+const canceling = ref(false)
+const retrying = ref(false)
 const page = ref(1)
 const limit = 50
 const expandedTaskIds = ref<string[]>([])
 const activeResult = ref<ResultFile | null>(null)
 const lightboxVisible = ref(false)
+let pollingTimer: ReturnType<typeof setInterval> | null = null
 
 const imageResults = computed(() => detail.value?.results.filter(isImageResult) ?? [])
+const isActive = computed(() => detail.value?.status === 'queued' || detail.value?.status === 'running')
 const viewerUrls = computed(() => imageResults.value.map(resultUrl))
 const activeResultIndex = computed(() => activeResult.value
   ? Math.max(0, imageResults.value.findIndex(result => result.id === activeResult.value?.id))
   : 0)
 
-async function fetchDetail() {
+async function fetchDetail(quiet = false) {
   if (!batchId.value) return
-  loading.value = true
+  if (refreshing.value) return
+  refreshing.value = true
+  if (!quiet) loading.value = true
+  loadError.value = ''
   try {
     const params = new URLSearchParams({
       taskLimit: String(limit),
@@ -53,9 +62,10 @@ async function fetchDetail() {
     })
     detail.value = await $fetch<BatchDetail>(`/api/v1/batch/${batchId.value}?${params}`)
   } catch (error: unknown) {
-    ElMessage.error(error instanceof Error ? error.message : t('gallery.fetchDetailFailed'))
+    loadError.value = error instanceof Error ? error.message : t('gallery.fetchDetailFailed')
   } finally {
-    loading.value = false
+    if (!quiet) loading.value = false
+    refreshing.value = false
   }
 }
 
@@ -116,7 +126,77 @@ function openResults() {
   void navigateTo(`/gallery/${batchId.value}/results`)
 }
 
-onMounted(fetchDetail)
+async function cancelBatch() {
+  if (!detail.value || !isActive.value) return
+  try {
+    await ElMessageBox.confirm(t('runDetail.cancelConfirm'), t('runDetail.cancelTitle'), { type: 'warning' })
+    canceling.value = true
+    await $fetch(`/api/v1/batch/${detail.value.id}/cancel`, { method: 'POST' })
+    ElMessage.success(t('runDetail.cancelSent'))
+    await fetchDetail(true)
+  } catch (error: unknown) {
+    if (error === 'cancel' || error === 'close') return
+    ElMessage.error(error instanceof Error ? error.message : t('runDetail.cancelFailed'))
+  } finally {
+    canceling.value = false
+  }
+}
+
+async function retryFailedTasks() {
+  if (!detail.value || failedCount(detail.value) === 0) return
+  retrying.value = true
+  try {
+    const result = await $fetch<{ count: number }>(`/api/v1/batch/${detail.value.id}/retry`, { method: 'POST' })
+    if (result.count > 0) ElMessage.success(t('runDetail.retriedFailed', { count: result.count }))
+    else ElMessage.warning(t('runDetail.noRetryableTasks'))
+    await fetchDetail(true)
+    startPolling()
+  } catch (error: unknown) {
+    ElMessage.error(error instanceof Error ? error.message : t('runDetail.retryFailed'))
+  } finally {
+    retrying.value = false
+  }
+}
+
+function startPolling() {
+  if (pollingTimer || !isActive.value || document.hidden) return
+  pollingTimer = setInterval(() => {
+    void fetchDetail(true)
+  }, 2000)
+}
+
+function stopPolling() {
+  if (!pollingTimer) return
+  clearInterval(pollingTimer)
+  pollingTimer = null
+}
+
+function syncPolling() {
+  if (isActive.value && !document.hidden) startPolling()
+  else stopPolling()
+}
+
+function handleVisibilityChange() {
+  if (document.hidden) {
+    stopPolling()
+    return
+  }
+  void fetchDetail(true)
+  startPolling()
+}
+
+watch(isActive, syncPolling)
+
+onMounted(async () => {
+  await fetchDetail()
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+  syncPolling()
+})
+
+onBeforeUnmount(() => {
+  stopPolling()
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+})
 </script>
 
 <template>
@@ -127,17 +207,42 @@ onMounted(fetchDetail)
         <p class="fm-page-subtitle">{{ t('gallery.detailSubtitle') }}</p>
       </div>
       <div class="actions">
-        <ElButton @click="backToQueue">
+        <ElButton text @click="backToQueue">
           <FmIcon name="arrowLeft" :size="16" />
           {{ t('gallery.backToList') }}
         </ElButton>
         <ElButton @click="openResults">{{ t('gallery.result') }}</ElButton>
-        <ElButton :loading="loading" type="primary" @click="fetchDetail">{{ t('gallery.refreshDetail') }}</ElButton>
+        <ElButton
+          v-if="isActive"
+          type="danger"
+          plain
+          :loading="canceling"
+          @click="cancelBatch"
+        >{{ t('runDetail.cancelUnfinished') }}</ElButton>
+        <ElButton
+          v-if="detail && failedCount(detail) > 0"
+          type="warning"
+          :loading="retrying"
+          @click="retryFailedTasks"
+        >{{ t('runDetail.retryFailedTasks') }}</ElButton>
+        <ElButton :loading="loading" type="primary" @click="fetchDetail()">{{ t('gallery.refreshDetail') }}</ElButton>
       </div>
     </div>
 
     <section v-loading="loading" class="fm-stack">
-      <ElEmpty v-if="!detail" :description="t('gallery.readingDetail')" />
+      <ElAlert
+        v-if="loadError"
+        :title="t('gallery.fetchDetailFailed')"
+        :description="loadError"
+        type="error"
+        show-icon
+        :closable="false"
+      >
+        <template #default>
+          <ElButton size="small" @click="fetchDetail()">{{ t('common.retry') }}</ElButton>
+        </template>
+      </ElAlert>
+      <ElEmpty v-else-if="!detail" :description="t('gallery.readingDetail')" />
 
       <template v-else>
         <div class="detail-header fm-card">
@@ -145,7 +250,13 @@ onMounted(fetchDetail)
             <h2>{{ batchTitle(detail, t, locale) }}</h2>
             <span>{{ batchSubtitle(detail, t, locale) }}</span>
           </div>
-          <ElTag :type="statusType(detail.status)" effect="light">{{ statusLabel(detail.status, t) }}</ElTag>
+          <div class="detail-status" aria-live="polite">
+            <span v-if="isActive" class="live-indicator">
+              <span class="live-dot" />
+              {{ t('gallery.liveUpdating') }}
+            </span>
+            <ElTag :type="statusType(detail.status)" effect="light">{{ statusLabel(detail.status, t) }}</ElTag>
+          </div>
         </div>
 
         <div class="detail-grid">
@@ -186,7 +297,7 @@ onMounted(fetchDetail)
             </div>
           </div>
 
-          <div class="fm-stack-sm">
+          <div v-if="detail.tasks.length" class="fm-stack-sm">
             <article v-for="(task, index) in detail.tasks" :key="task.id" class="task-row" :class="{ expanded: isTaskExpanded(task.id) }">
               <button class="task-summary" type="button" @click="toggleTask(task.id)">
                 <span class="task-index mono">#{{ detail.taskPage.offset + index + 1 }}</span>
@@ -228,6 +339,7 @@ onMounted(fetchDetail)
               </div>
             </article>
           </div>
+          <ElEmpty v-else :description="t('gallery.noTasks')" />
 
           <div v-if="detail.taskPage.total > limit" class="pagination-row">
             <ElPagination
@@ -269,6 +381,35 @@ onMounted(fetchDetail)
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.detail-status,
+.live-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.live-indicator {
+  color: var(--fm-primary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--fm-primary);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--fm-primary) 14%, transparent);
+}
+
+@media (max-width: 760px) {
+  .detail-header,
+  .detail-status {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
 
 .detail-header h2,

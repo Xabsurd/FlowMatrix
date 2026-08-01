@@ -40,3 +40,48 @@ a {
   color: inherit;
   text-decoration: none;
 }
+
+:where(a, button, [role="button"], input, textarea, select):focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--fm-primary) 68%, white);
+  outline-offset: 2px;
+}
+
+.fm-overflow-tooltip {
+  position: fixed;
+  z-index: 10000;
+  max-width: min(520px, calc(100vw - 16px));
+  max-height: min(280px, calc(100vh - 16px));
+  padding: 8px 10px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--fm-border) 72%, var(--fm-primary));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--fm-panel-strong) 96%, black);
+  box-shadow: 0 10px 30px color-mix(in srgb, black 34%, transparent);
+  color: var(--fm-text);
+  font-size: 12px;
+  line-height: 1.5;
+  opacity: 0;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.fm-overflow-tooltip.is-visible {
+  opacity: 1;
+}
+
+.fm-overflow-tooltip[hidden] {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

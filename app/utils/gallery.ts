@@ -54,7 +54,6 @@ export function batchTitle(batch: BatchRun, t: Translate, locale = 'zh-CN') {
 export function batchSubtitle(batch: BatchRun, t: Translate, locale = 'zh-CN') {
   const finished = batch.finishedAt ? ' · ' + t('gallery.finishedAt', { time: formatTime(batch.finishedAt, locale) }) : ''
   return t('gallery.batchSubtitle', {
-    mode: modeLabel(batch.combinationMode, t),
     created: formatTime(batch.createdAt, locale),
     finished
   })

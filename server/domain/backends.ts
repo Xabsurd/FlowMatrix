@@ -5,6 +5,7 @@ import * as comfyui from '../infrastructure/comfyui/client'
 import { getOnlineProvider, normalizeProviderId } from '../infrastructure/providers/registry'
 import { getProviderRuntimeConfig } from '../infrastructure/providers/settings'
 import type { BackendScheduleMode, BackendScheduleDecision, ModelSignature } from '../../shared/types/app'
+import { COMFY_RESOURCE_TYPES } from '../../shared/utils/model-resources'
 
 export interface BackendRow {
   id: string
@@ -192,6 +193,20 @@ export async function testBackendConnection(id: string): Promise<{ ok: boolean; 
       return { ok: false, error: error instanceof Error ? error.message : String(error) }
     }
   }
+  if (backend.type === 'codex-cli') {
+    const now = Date.now()
+    try {
+      const provider = getOnlineProvider('gpt-image-2')
+      const result = await provider.testConnection({ apiKey: '', baseUrl: '', model: '' })
+      getSqlite().prepare('UPDATE backends SET health_status = ?, last_health_check = ?, failure_count = 0, updated_at = ? WHERE id = ?')
+        .run('healthy', now, now, id)
+      return { ok: true, version: result.message }
+    } catch (error) {
+      getSqlite().prepare('UPDATE backends SET health_status = ?, last_health_check = ?, failure_count = failure_count + 1, last_failure_at = ?, updated_at = ? WHERE id = ?')
+        .run('unhealthy', now, now, now, id)
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  }
   if (backend.type !== 'comfyui') return { ok: false, error: 'Unknown backend type' }
 
   const result = await comfyui.testConnection(backend.endpoint)
@@ -212,8 +227,6 @@ export async function testBackendConnection(id: string): Promise<{ ok: boolean; 
 // 资源同步
 // ============================================
 
-const RESOURCE_TYPES = ['checkpoint', 'lora', 'vae', 'unet', 'controlnet', 'upscale', 'embedding']
-
 export async function refreshBackendResources(backendId: string): Promise<{ synced: number; errors: string[] }> {
   const backend = getBackend(backendId)
   if (!backend || backend.type !== 'comfyui') return { synced: 0, errors: ['Not a ComfyUI backend'] }
@@ -222,19 +235,19 @@ export async function refreshBackendResources(backendId: string): Promise<{ sync
   const errors: string[] = []
   let synced = 0
 
-  for (const type of RESOURCE_TYPES) {
-    try {
-      const models = await comfyui.listModels(backend.endpoint, type)
+  try {
+    const resources = await comfyui.listModelResources(backend.endpoint)
+    for (const type of COMFY_RESOURCE_TYPES) {
       db.prepare('DELETE FROM backend_resources WHERE backend_id = ? AND type = ?').run(backendId, type)
       const now = Date.now()
-      for (const name of models) {
+      for (const name of resources[type] ?? []) {
         db.prepare('INSERT INTO backend_resources (id, backend_id, type, name, last_synced_at) VALUES (?, ?, ?, ?, ?)')
           .run(randomUUID(), backendId, type, name, now)
         synced++
       }
-    } catch (error) {
-      errors.push(`${type}: ${String(error)}`)
     }
+  } catch (error) {
+    errors.push(String(error))
   }
   return { synced, errors }
 }

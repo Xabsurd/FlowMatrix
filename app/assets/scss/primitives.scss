@@ -29,6 +29,26 @@
   min-width: 0;
 }
 
+.actions > .el-button + .el-button {
+  margin-left: 0;
+}
+
+@media (max-width: 720px) {
+  .fm-page-header {
+    align-items: flex-start;
+    grid-template-columns: 1fr;
+  }
+
+  .fm-page-header > .actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .actions > .el-button {
+    min-height: 40px;
+  }
+}
+
 .text-muted {
   color: var(--fm-muted);
 }

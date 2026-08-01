@@ -65,7 +65,12 @@
 
     <ElEmpty v-else-if="!loading" :description="t('workflows.empty')" />
 
-    <ElDialog v-model="showUploadDialog" :title="editingId ? t('workflows.editDialog') : t('workflows.uploadDialog')" width="680px">
+    <ElDialog
+      v-model="showUploadDialog"
+      :title="editingId ? t('workflows.editDialog') : t('workflows.uploadDialog')"
+      width="680px"
+      :before-close="confirmCloseDialog"
+    >
       <ElForm label-position="top">
         <ElFormItem :label="t('workflows.name')" required>
           <ElInput v-model="form.name" :placeholder="t('workflows.namePlaceholder')" />
@@ -151,7 +156,8 @@
         </ElCollapse>
       </ElForm>
       <template #footer>
-        <ElButton @click="showUploadDialog = false">{{ t('common.cancel') }}</ElButton>
+        <span v-if="isDialogDirty" class="fm-unsaved-hint">{{ t('common.unsavedChanges') }}</span>
+        <ElButton @click="requestCloseDialog">{{ t('common.cancel') }}</ElButton>
         <ElButton type="primary" :loading="saving" @click="saveWorkflow">{{ editingId ? t('workflows.saveChanges') : t('workflows.saveWorkflow') }}</ElButton>
       </template>
     </ElDialog>
@@ -188,6 +194,7 @@ const loading = ref(false)
 const saving = ref(false)
 const showUploadDialog = ref(false)
 const editingId = ref('')
+const dialogBaseline = ref('')
 const form = reactive({
   name: '',
   jsonText: '',
@@ -226,6 +233,9 @@ const workflowFileSummary = computed(() => {
   const updatedAt = form.fileUpdatedAt ? formatTime(form.fileUpdatedAt) : t('workflows.justNow')
   return `${formatBytes(currentWorkflowJsonSize.value)} · ${updatedAt}`
 })
+const isDialogDirty = computed(() => Boolean(showUploadDialog.value)
+  && Boolean(dialogBaseline.value)
+  && dialogSnapshot() !== dialogBaseline.value)
 
 async function fetchWorkflows() {
   loading.value = true
@@ -245,6 +255,7 @@ function openUploadDialog() {
   form.fileSize = 0
   form.fileUpdatedAt = 0
   showUploadDialog.value = true
+  captureDialogBaseline()
 }
 
 function openEditDialog(workflow: Workflow) {
@@ -256,6 +267,41 @@ function openEditDialog(workflow: Workflow) {
   form.fileSize = new Blob([form.jsonText]).size
   form.fileUpdatedAt = workflow.updatedAt
   showUploadDialog.value = true
+  captureDialogBaseline()
+}
+
+function dialogSnapshot() {
+  return JSON.stringify({
+    name: form.name,
+    jsonText: form.jsonText,
+    tags: [...form.tags].sort(),
+    fileName: form.fileName
+  })
+}
+
+function captureDialogBaseline() {
+  nextTick(() => {
+    dialogBaseline.value = dialogSnapshot()
+  })
+}
+
+async function confirmCloseDialog(done: () => void) {
+  if (!isDialogDirty.value || saving.value) {
+    done()
+    return
+  }
+  try {
+    await ElMessageBox.confirm(t('common.discardChangesConfirm'), t('common.unsavedChanges'), { type: 'warning' })
+    done()
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') throw error
+  }
+}
+
+function requestCloseDialog() {
+  void confirmCloseDialog(() => {
+    showUploadDialog.value = false
+  })
 }
 
 async function readWorkflowFile(file: UploadFile) {
@@ -408,6 +454,7 @@ onMounted(fetchWorkflows)
 .fm-workflow-tags { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
 .fm-workflow-tags.empty { color: var(--fm-muted); font-size: 12px; }
 .fm-card-actions { display: flex; justify-self: end; flex: 0 0 auto; align-items: center; gap: 6px; }
+.fm-unsaved-hint { margin-right: auto; color: var(--fm-warning); font-size: 12px; }
 .fm-slug-tag { max-width: min(360px, 42vw); }
 .fm-slug-tag :deep(.el-tag__content) {
   overflow: hidden;

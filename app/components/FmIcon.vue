@@ -3,6 +3,7 @@
 import { Icon } from '@iconify/vue'
 import arrowLeftIcon from '@iconify-icons/lucide/arrow-left'
 import boxesIcon from '@iconify-icons/lucide/boxes'
+import checkIcon from '@iconify-icons/lucide/check'
 import chevronDownIcon from '@iconify-icons/lucide/chevron-down'
 import chevronLeftIcon from '@iconify-icons/lucide/chevron-left'
 import chevronRightIcon from '@iconify-icons/lucide/chevron-right'
@@ -34,6 +35,7 @@ const props = defineProps<{
 const icons = {
   arrowLeft: arrowLeftIcon,
   boxes: boxesIcon,
+  check: checkIcon,
   chevronDown: chevronDownIcon,
   chevronLeft: chevronLeftIcon,
   chevronRight: chevronRightIcon,

@@ -20,7 +20,23 @@
 </template>
 
 <script setup lang="ts">
+const route = useRoute()
 const activeTab = ref('workflow')
+
+watch(activeTab, (tab) => {
+  if (import.meta.client) localStorage.setItem('flowmatrix.run-tab', tab)
+})
+
+onMounted(() => {
+  if (typeof route.query.presetId === 'string') {
+    activeTab.value = 'workflow'
+    return
+  }
+  const requested = route.query.mode
+  const saved = localStorage.getItem('flowmatrix.run-tab')
+  if (requested === 'online' || requested === 'workflow') activeTab.value = requested
+  else if (saved === 'online' || saved === 'workflow') activeTab.value = saved
+})
 </script>
 
 <style scoped>

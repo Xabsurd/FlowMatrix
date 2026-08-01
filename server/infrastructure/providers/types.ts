@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-export type ProviderKind = 'openai-compatible'
+export type ProviderKind = 'openai-compatible' | 'cli-command'
 
 export interface ProviderRuntimeConfig {
   apiKey: string
   baseUrl: string
   model: string
   timeoutMs?: number
+  binaryPath?: string
 }
 
 export interface ProviderDescriptor {
@@ -20,7 +21,7 @@ export interface ProviderDescriptor {
 export interface GenerateImageInput {
   prompt: string
   model?: string
-  size?: '1024x1024' | '1024x1536' | '1536x1024' | 'auto'
+  size?: '1K' | '2K' | '4K' | '1024x1024' | '1024x1536' | '1536x1024' | '1152x1536' | '1536x1152' | '1080x1920' | '1920x1080' | '1080x2520' | '2520x1080' | 'auto'
   quality?: 'low' | 'medium' | 'high' | 'auto'
   outputFormat?: 'png' | 'webp' | 'jpeg'
   n?: number

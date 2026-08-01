@@ -1,13 +1,39 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <template>
-  <section class="fm-online-run fm-card">
+  <section v-loading="initialLoading" class="fm-online-run fm-card">
     <div class="fm-panel-heading">
       <div>
         <span>{{ $t('onlineRun.title') }}</span>
         <small>{{ $t('onlineRun.subtitle') }}</small>
       </div>
-      <ElButton type="primary" :loading="submitting" @click="startRun">{{ $t('onlineRun.submit') }}</ElButton>
+      <ElButton type="primary" :loading="submitting" :disabled="!canSubmit" @click="startRun">{{ submitButtonLabel }}</ElButton>
     </div>
+
+    <ElAlert
+      v-if="loadError"
+      :title="$t('onlineRun.loadFailed')"
+      :description="loadError"
+      type="error"
+      show-icon
+      :closable="false"
+    >
+      <template #default>
+        <ElButton size="small" @click="loadInitialData">{{ $t('common.retry') }}</ElButton>
+      </template>
+    </ElAlert>
+
+    <ElAlert
+      v-else-if="!initialLoading && !providerBackends.length"
+      :title="$t('onlineRun.noBackends')"
+      :description="$t('onlineRun.noBackendsHint')"
+      type="warning"
+      show-icon
+      :closable="false"
+    >
+      <template #default>
+        <ElButton size="small" type="primary" @click="navigateTo('/backends')">{{ $t('onlineRun.configureBackend') }}</ElButton>
+      </template>
+    </ElAlert>
 
     <ElForm label-position="top" class="online-form">
       <div class="online-grid">
@@ -51,16 +77,25 @@
             </ElButton>
           </div>
         </ElFormItem>
-        <ElFormItem :label="$t('onlineRun.size')">
-          <ElSelect v-model="form.size" style="width: 100%">
-            <ElOption label="1024 x 1024" value="1024x1024" />
-            <ElOption label="1024 x 1536" value="1024x1536" />
-            <ElOption label="1536 x 1024" value="1536x1024" />
-            <ElOption :label="$t('onlineRun.auto')" value="auto" />
+        <ElFormItem :label="$t('onlineRun.aspectRatio')">
+          <ElSelect v-model="form.aspectRatio" style="width: 100%">
+            <ElOption label="1:1" value="1:1" />
+            <ElOption label="2:3" value="2:3" />
+            <ElOption label="3:2" value="3:2" />
+            <ElOption label="3:4" value="3:4" />
+            <ElOption label="4:3" value="4:3" />
+            <ElOption label="9:16" value="9:16" />
+            <ElOption label="16:9" value="16:9" />
+            <ElOption label="9:21" value="9:21" />
+            <ElOption label="21:9" value="21:9" />
           </ElSelect>
         </ElFormItem>
-        <ElFormItem :label="$t('onlineRun.outputsPerPrompt')">
-          <ElInputNumber v-model="form.n" :min="1" :max="10" />
+        <ElFormItem :label="$t('onlineRun.resolution')">
+          <ElSelect v-model="form.resolution" style="width: 100%">
+            <ElOption label="1K" value="1K" />
+            <ElOption label="2K" value="2K" />
+            <ElOption label="4K" value="4K" />
+          </ElSelect>
         </ElFormItem>
       </div>
 
@@ -80,8 +115,11 @@
             <ElOption label="JPEG" value="jpeg" />
           </ElSelect>
         </ElFormItem>
+        <ElFormItem :label="$t('onlineRun.outputsPerPrompt')">
+          <ElInputNumber v-model="form.n" :min="1" :max="10" style="width: 100%" />
+        </ElFormItem>
         <ElFormItem v-if="form.mode === 'image-to-image'" :label="$t('onlineRun.imagesPerGroup')">
-          <ElInputNumber v-model="form.groupSize" :min="1" :max="16" />
+          <ElInputNumber v-model="form.groupSize" :min="1" :max="16" style="width: 100%" />
         </ElFormItem>
       </div>
 
@@ -123,6 +161,11 @@
           <strong>{{ estimatedOutputs }}</strong>
         </div>
       </div>
+
+      <div v-if="submitHint" class="submit-hint" role="status">
+        <FmIcon name="info" :size="16" />
+        <span>{{ submitHint }}</span>
+      </div>
     </ElForm>
   </section>
 </template>
@@ -149,6 +192,8 @@ interface RuntimeAsset {
 
 const { t } = useI18n()
 const backends = ref<Backend[]>([])
+const initialLoading = ref(false)
+const loadError = ref('')
 const submitting = ref(false)
 const loadingModels = ref(false)
 const providerModels = ref<string[]>([])
@@ -161,7 +206,8 @@ const form = reactive({
   backendId: '',
   name: '',
   model: '',
-  size: '1024x1024',
+  aspectRatio: '1:1',
+  resolution: '1K',
   quality: 'auto',
   outputFormat: 'png',
   n: 1,
@@ -174,7 +220,33 @@ const modeOptions = computed(() => [
   { label: t('onlineRun.imageToImage'), value: 'image-to-image' }
 ])
 
-const providerBackends = computed(() => backends.value.filter(backend => backend.type === 'provider'))
+const computedSize = computed(() => {
+  const ratioMap: Record<string, [number, number]> = {
+    '1:1': [1, 1],
+    '2:3': [2, 3],
+    '3:2': [3, 2],
+    '3:4': [3, 4],
+    '4:3': [4, 3],
+    '9:16': [9, 16],
+    '16:9': [16, 9],
+    '9:21': [9, 21],
+    '21:9': [21, 9]
+  }
+  const resolutionMap: Record<string, number> = {
+    '1K': 1024,
+    '2K': 2048,
+    '4K': 3840
+  }
+  const [w, h] = ratioMap[form.aspectRatio] || [1, 1]
+  const base = resolutionMap[form.resolution] || 1024
+  const width = Math.round(base * w / Math.max(w, h))
+  const height = Math.round(base * h / Math.max(w, h))
+  return `${width}x${height}`
+})
+
+const providerBackends = computed(() => backends.value.filter(backend =>
+  backend.type === 'provider' || backend.type === 'codex-cli'
+))
 const prompts = computed(() => form.promptsText.split(/\r?\n/).map(line => line.trim()).filter(Boolean))
 const imageGroups = computed(() => {
   const size = Math.max(1, Math.min(16, Number(form.groupSize || 1)))
@@ -185,6 +257,19 @@ const imageGroups = computed(() => {
   return groups.filter(group => group.length === size)
 })
 const estimatedOutputs = computed(() => prompts.value.length * Number(form.n || 1))
+const submitHint = computed(() => {
+  if (initialLoading.value || loadError.value) return ''
+  if (!form.backendId) return t('onlineRun.selectBackendFirst')
+  if (!prompts.value.length) return t('onlineRun.enterPromptFirst')
+  if (form.mode === 'image-to-image' && imageGroups.value.length !== prompts.value.length) {
+    return t('onlineRun.imageGroupMismatch', { prompts: prompts.value.length, groups: imageGroups.value.length })
+  }
+  return ''
+})
+const canSubmit = computed(() => !submitting.value && !initialLoading.value && !loadError.value && !submitHint.value)
+const submitButtonLabel = computed(() => estimatedOutputs.value > 0
+  ? t('onlineRun.submitWithCount', { count: estimatedOutputs.value })
+  : t('onlineRun.submit'))
 
 watch(providerBackends, (items) => {
   if (!form.backendId && items[0]) form.backendId = items[0].id
@@ -192,6 +277,18 @@ watch(providerBackends, (items) => {
 
 async function fetchBackends() {
   backends.value = await $fetch<Backend[]>('/api/v1/backends')
+}
+
+async function loadInitialData() {
+  initialLoading.value = true
+  loadError.value = ''
+  try {
+    await Promise.all([fetchBackends(), loadProviderSettings()])
+  } catch (error: unknown) {
+    loadError.value = error instanceof Error ? error.message : t('onlineRun.loadFailed')
+  } finally {
+    initialLoading.value = false
+  }
 }
 
 async function loadProviderSettings() {
@@ -270,14 +367,14 @@ async function startRun() {
         prompts: prompts.value,
         imageGroups: uploadedGroups,
         model: form.model || undefined,
-        size: form.size,
+        size: computedSize.value,
         quality: form.quality,
         outputFormat: form.outputFormat,
         n: form.n
       }
     })
     ElMessage.success(t('onlineRun.created'))
-    await navigateTo(`/gallery?batchRunId=${run.id}`)
+    await navigateTo(`/gallery/${run.id}/detail`)
   } catch (error: unknown) {
     ElMessage.error(error instanceof Error ? error.message : t('run.createFailed'))
   } finally {
@@ -304,8 +401,7 @@ function backendOptionLabel(backend: Backend) {
 }
 
 onMounted(() => {
-  void fetchBackends()
-  void loadProviderSettings()
+  void loadInitialData()
 })
 </script>
 
@@ -412,6 +508,19 @@ onMounted(() => {
   border: 1px solid var(--fm-border);
   border-radius: var(--fm-radius);
   background: color-mix(in srgb, var(--fm-panel-muted) 68%, transparent);
+}
+
+.submit-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--fm-warning) 28%, var(--fm-border));
+  border-radius: var(--fm-radius);
+  background: color-mix(in srgb, var(--fm-warning) 7%, var(--fm-panel-muted));
+  color: var(--fm-muted);
+  font-size: 12px;
 }
 
 @media (max-width: 900px) {

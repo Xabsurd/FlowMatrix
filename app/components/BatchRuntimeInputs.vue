@@ -11,9 +11,9 @@
         <div class="fm-runtime-param">
           <div>
             <strong>{{ readableParamName(param) }}</strong>
-            <span>{{ param.nodeType }} · {{ effectiveInferredType(param) }}</span>
+            <span>{{ paramContextLabel(param) }}</span>
           </div>
-          <ElTag size="small" effect="plain">{{ param.controlType }}</ElTag>
+          <ElTag size="small" effect="plain">{{ paramBadgeLabel(param) }}</ElTag>
         </div>
 
         <div class="fm-runtime-editor">
@@ -41,25 +41,51 @@
           </template>
 
           <template v-else-if="isModelParam(param)">
+            <div class="fm-model-select-head">
+              <div>
+                <strong>{{ resourceTypeLabel(param) }}</strong>
+                <span>{{ resourceFolderLabel(param) }}</span>
+              </div>
+              <small>{{ resourceCountLabel(param) }}</small>
+            </div>
             <ElSelect
               :model-value="modelValues(param)"
               multiple
               filterable
               collapse-tags
               collapse-tags-tooltip
+              :max-collapse-tags="3"
+              popper-class="fm-resource-select-popper"
               :loading="resourceLoading"
-              :placeholder="$t('runtime.selectResources')"
+              :placeholder="$t('runtime.selectModelType', { type: resourceTypeLabel(param) })"
+              :no-data-text="$t('runtime.noModelsForLoader', { type: resourceTypeLabel(param) })"
               style="width: 100%"
               @update:model-value="setModelValues(param, $event)">
               <ElOption
                 v-for="resource in resourceOptionsFor(param)"
-                :key="`${resource.backendId}-${resource.name}`"
+                :key="resource.name"
                 :label="resource.name"
                 :value="resource.name">
-                <span>{{ resource.name }}</span>
-                <small class="fm-option-meta">{{ resource.type }}</small>
+                <div class="fm-resource-option" :class="{ 'is-selected': isModelSelected(param, resource.name) }">
+                  <FmIcon
+                    class="fm-resource-option-check"
+                    :class="{ 'is-visible': isModelSelected(param, resource.name) }"
+                    name="check"
+                    :size="16"
+                  />
+                  <strong :title="resource.name">{{ resource.name }}</strong>
+                  <span>
+                    {{ isModelSelected(param, resource.name)
+                      ? $t('runtime.selected')
+                      : resourceAvailabilityLabel(resource) }}
+                  </span>
+                </div>
               </ElOption>
             </ElSelect>
+            <div class="fm-model-selection-summary">
+              <span>{{ $t('runtime.selectedModels', { count: candidateCount(param) }) }}</span>
+              <span v-if="!resourceLoading && !resourceOptionsFor(param).length">{{ $t('runtime.syncModelsHint') }}</span>
+            </div>
           </template>
 
           <template v-else>
@@ -71,7 +97,7 @@
               @keydown.enter.exact.prevent="addTextDraft(param)" />
           </template>
 
-          <div class="fm-runtime-values">
+          <div v-if="!isModelParam(param)" class="fm-runtime-values">
             <template v-if="candidateCount(param)">
               <template v-for="candidate in candidatesFor(param)" :key="candidate.id">
                 <ElPopover
@@ -136,6 +162,10 @@
 <script setup lang="ts">
 import { ElMessage } from 'element-plus'
 import { formatSize } from '~/utils/gallery'
+import {
+  getComfyResourceDefinition,
+  inferComfyResourceType
+} from '~~/shared/utils/model-resources'
 
 interface NodeParam {
   nodeId: string
@@ -143,6 +173,7 @@ interface NodeParam {
   inputName: string
   inferredType: string
   controlType: string
+  resourceType?: string
   runtimeInput?: boolean
   defaultValue?: unknown
 }
@@ -185,6 +216,11 @@ interface BackendResource {
   name: string
 }
 
+interface ModelResourceOption {
+  name: string
+  backendNames: string[]
+}
+
 interface RuntimeCandidate {
   id: string
   value: unknown
@@ -209,6 +245,7 @@ const valueBuckets = reactive<Record<string, RuntimeCandidate[]>>({})
 const fileBuckets = reactive<Record<string, RuntimeFile[]>>({})
 const textDrafts = reactive<Record<string, string>>({})
 const resources = ref<BackendResource[]>([])
+const resourceBackends = ref<Backend[]>([])
 const resourceLoading = ref(false)
 const fileInputRef = ref<HTMLInputElement>()
 const fileInputAccept = ref('')
@@ -411,6 +448,7 @@ async function fetchResources() {
     const targetBackends = targetBackendId
       ? backends.filter(backend => backend.id === targetBackendId)
       : backends.filter(backend => backend.type === 'comfyui' && backend.enabled)
+    resourceBackends.value = targetBackends
 
     const rows = await Promise.all(targetBackends.map(async (backend) => {
       try {
@@ -427,29 +465,38 @@ async function fetchResources() {
 
 function resourceOptionsFor(param: NodeParam) {
   const type = resourceTypeFor(param)
-  const seen = new Set<string>()
-  return resources.value.filter((resource) => {
-    if (type && resource.type !== type) return false
-    if (seen.has(resource.name)) return false
-    seen.add(resource.name)
-    return true
+  const backendNames = new Map(resourceBackends.value.map(backend => [backend.id, backend.name]))
+  const options = new Map<string, ModelResourceOption>()
+
+  for (const resource of resources.value) {
+    if (type && resource.type !== type) continue
+    const current = options.get(resource.name) || {
+      name: resource.name,
+      backendNames: []
+    }
+    const backendName = backendNames.get(resource.backendId)
+    if (backendName && !current.backendNames.includes(backendName)) current.backendNames.push(backendName)
+    options.set(resource.name, current)
+  }
+
+  return [...options.values()].sort((a, b) => a.name.localeCompare(b.name))
+}
+
+function resourceAvailabilityLabel(resource: ModelResourceOption) {
+  if (resourceBackends.value.length <= 1) return resource.backendNames[0] || ''
+  return t('runtime.backendAvailability', {
+    available: resource.backendNames.length,
+    total: resourceBackends.value.length
   })
 }
 
+function isModelSelected(param: NodeParam, name: string) {
+  return modelValues(param).includes(name)
+}
+
 function resourceTypeFor(param: NodeParam) {
-  const key = `${param.nodeType}.${param.inputName}`
   if (isScalarParam(param)) return ''
-  const nodeType = param.nodeType.toLowerCase()
-  const inputName = param.inputName.toLowerCase()
-  const combined = `${nodeType}.${inputName}`
-  if (key === 'LoraLoader.lora_name' || param.controlType === 'lora-select' || inputName === 'lora_name') return 'lora'
-  if (/^(ckpt|checkpoint)_?name$/.test(inputName) || /checkpointloader/.test(nodeType)) return 'checkpoint'
-  if (inputName === 'vae_name' || nodeType.includes('vaeloader')) return 'vae'
-  if (inputName === 'unet_name' || inputName === 'diffusion_model_name' || nodeType.includes('unetloader')) return 'unet'
-  if (/^control_?net_?name$/.test(inputName) || nodeType.includes('controlnetloader')) return 'controlnet'
-  if (/^upscale(r)?_?name$/.test(inputName) || nodeType.includes('upscalemodelloader')) return 'upscale'
-  if (inputName === 'embedding_name') return 'embedding'
-  return ''
+  return param.resourceType || inferComfyResourceType(param.nodeType, param.inputName)
 }
 
 function candidatesFor(param: NodeParam) {
@@ -636,6 +683,7 @@ function uploadHint(param: NodeParam) {
 }
 
 function readableParamName(param: NodeParam) {
+  if (isModelParam(param)) return resourceTypeLabel(param)
   const labels: Record<string, string> = {
     text: t('runtime.labels.prompt'),
     positive: t('runtime.labels.positivePrompt'),
@@ -653,6 +701,36 @@ function readableParamName(param: NodeParam) {
   const name = param.inputName.toLowerCase()
   const matched = Object.entries(labels).find(([key]) => name.includes(key))
   return matched?.[1] || param.inputName
+}
+
+function paramContextLabel(param: NodeParam) {
+  return isModelParam(param)
+    ? `${param.nodeType} · ${param.inputName}`
+    : `${param.nodeType} · ${effectiveInferredType(param)}`
+}
+
+function paramBadgeLabel(param: NodeParam) {
+  return isModelParam(param) ? resourceTypeLabel(param) : param.controlType
+}
+
+function resourceTypeLabel(param: NodeParam) {
+  const type = resourceTypeFor(param)
+  if (!type) return t('runtime.labels.model')
+  const key = `runtime.resourceTypes.${type}`
+  const translated = t(key)
+  return translated === key ? getComfyResourceDefinition(type)?.label || type : translated
+}
+
+function resourceFolderLabel(param: NodeParam) {
+  const definition = getComfyResourceDefinition(resourceTypeFor(param))
+  return definition ? `ComfyUI/models/${definition.folder}` : param.inputName
+}
+
+function resourceCountLabel(param: NodeParam) {
+  return t('runtime.availableModels', {
+    count: resourceOptionsFor(param).length,
+    backends: resourceBackends.value.length
+  })
 }
 
 function singleValuePlaceholder(param: NodeParam) {
@@ -740,7 +818,7 @@ onBeforeUnmount(() => {
   }
 })
 
-defineExpose({ collectParams, applyCopiedParams })
+defineExpose({ collectParams, applyCopiedParams, refreshResources: fetchResources })
 </script>
 
 <style scoped>
@@ -815,6 +893,50 @@ defineExpose({ collectParams, applyCopiedParams })
   display: grid;
   gap: 8px;
   min-width: 0;
+}
+
+.fm-model-select-head,
+.fm-model-select-head > div,
+.fm-model-selection-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.fm-model-select-head {
+  justify-content: space-between;
+}
+
+.fm-model-select-head > div {
+  overflow: hidden;
+}
+
+.fm-model-select-head strong {
+  flex: 0 0 auto;
+  color: var(--fm-text);
+  font-size: 13px;
+}
+
+.fm-model-select-head span,
+.fm-model-select-head small,
+.fm-model-selection-summary {
+  color: var(--fm-muted);
+  font-size: 11px;
+}
+
+.fm-model-select-head span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fm-model-selection-summary {
+  justify-content: space-between;
+}
+
+.fm-model-selection-summary span:last-child {
+  color: var(--fm-warning);
 }
 
 .fm-runtime-values {

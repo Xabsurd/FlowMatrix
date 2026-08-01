@@ -61,8 +61,20 @@
           <ElSelect v-model="form.type" style="width: 100%">
             <ElOption label="ComfyUI" value="comfyui" />
             <ElOption :label="t('providers.title')" value="provider" />
+            <ElOption label="Codex CLI" value="codex-cli" />
           </ElSelect>
         </ElFormItem>
+        <template v-if="form.type === 'provider'">
+          <ElFormItem :label="t('providers.baseUrl')">
+            <ElInput v-model="form.baseUrl" placeholder="https://api.openai.com/v1" />
+          </ElFormItem>
+          <ElFormItem :label="t('providers.apiKey')">
+            <ElInput v-model="form.apiKey" type="password" show-password :placeholder="t('settings.apiKeyPlaceholder')" />
+          </ElFormItem>
+          <ElFormItem :label="t('providers.model')">
+            <ElInput v-model="form.model" placeholder="gpt-image-1" />
+          </ElFormItem>
+        </template>
         <ElFormItem :label="t('backends.maxConcurrency')">
           <ElInputNumber v-model="form.maxConcurrency" :min="1" :max="16" />
         </ElFormItem>
@@ -73,6 +85,12 @@
           v-if="form.type === 'provider'"
           class="fm-provider-hint"
           :title="t('backends.providerHint')"
+          type="info"
+          :closable="false" />
+        <ElAlert
+          v-if="form.type === 'codex-cli'"
+          class="fm-provider-hint"
+          :title="t('providers.codexCliGuideText')"
           type="info"
           :closable="false" />
         <ElFormItem :label="t('backends.tags')">
@@ -114,11 +132,15 @@ const form = reactive({
   type: 'comfyui',
   maxConcurrency: 2,
   weight: 1,
-  tagsStr: ''
+  tagsStr: '',
+  baseUrl: 'https://api.openai.com/v1',
+  apiKey: '',
+  model: 'gpt-image-1'
 })
 
 watch(() => form.type, (type) => {
   if (type === 'provider' && form.endpoint.startsWith('http')) form.endpoint = 'openai'
+  if (type === 'codex-cli' && form.endpoint.startsWith('http')) form.endpoint = 'codex-cli'
   if (type === 'comfyui' && !form.endpoint.startsWith('http')) form.endpoint = 'http://127.0.0.1:8188'
 })
 async function fetchBackends() {
@@ -146,13 +168,17 @@ async function addBackend() {
         type: form.type,
         maxConcurrency: form.maxConcurrency,
         weight: form.weight,
-        tags: form.tagsStr ? form.tagsStr.split(',').map(t => t.trim()).filter(Boolean) : []
+        tags: form.tagsStr ? form.tagsStr.split(',').map(t => t.trim()).filter(Boolean) : [],
+        baseUrl: form.baseUrl,
+        apiKey: form.apiKey,
+        model: form.model
       }
     })
     showAddDialog.value = false
     form.name = ''
-    form.endpoint = form.type === 'provider' ? 'openai' : 'http://127.0.0.1:8188'
+    form.endpoint = form.type === 'provider' ? 'openai' : form.type === 'codex-cli' ? 'codex-cli' : 'http://127.0.0.1:8188'
     form.tagsStr = ''
+    form.apiKey = ''
     await fetchBackends()
     ElMessage.success(t('backends.added'))
   } catch (e: unknown) {

@@ -26,15 +26,30 @@ async function runOnce() {
 }
 
 async function executeJob(queueJob: queue.QueueJob, batchRunId: string) {
+  const db = getSqlite()
+  const initialTask = db.prepare('SELECT status FROM run_tasks WHERE id = ?').get(queueJob.taskId) as { status: string } | undefined
+  if (initialTask?.status === 'canceled') {
+    queue.markCompleted(queueJob.id)
+    return
+  }
+
   try {
     queue.markProcessing(queueJob.id)
     await executeTask(queueJob.taskId)
     queue.markCompleted(queueJob.id)
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
+    const currentTask = db.prepare('SELECT status FROM run_tasks WHERE id = ?').get(queueJob.taskId) as { status: string } | undefined
+    if (currentTask?.status === 'canceled' || currentTask?.status === 'canceling') {
+      console.log(`[worker] Task ${queueJob.taskId} canceled.`)
+      queue.markCompleted(queueJob.id)
+      return
+    }
+    console.error(`[worker] Task ${queueJob.taskId} failed: ${msg}`)
+    console.error(`[worker] Error details:`, error)
     queue.markFailed(queueJob.id, msg)
-    updateTaskStatus(queueJob.taskId, 'failed', { errorMessage: msg })
-    incrementBatchProgress(batchRunId, 'failed_tasks')
+    const failed = updateTaskStatus(queueJob.taskId, 'failed', { errorMessage: msg })
+    if (failed) incrementBatchProgress(batchRunId, 'failed_tasks')
   }
 }
 
@@ -51,7 +66,7 @@ async function executeTask(taskId: string) {
     ? db.prepare('SELECT type FROM backends WHERE id = ? AND workspace_id = ?').get(backendId, task.workspace_id as string) as { type?: string } | undefined
     : undefined
 
-  if (backend?.type === 'provider') {
+  if (backend?.type === 'provider' || backend?.type === 'codex-cli') {
     await executeProviderTask(taskId)
     return
   }

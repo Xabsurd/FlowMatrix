@@ -12,32 +12,41 @@ export default defineEventHandler((event) => {
   const batchRunId = query.batchRunId ? String(query.batchRunId) : undefined
   const outputType = query.outputType ? String(query.outputType) : undefined
   
-  const response = listResults(ctx.workspaceId, {
-    limit,
-    offset,
-    batchRunId,
-    outputType,
-    includeDeleted: query.includeDeleted === 'true'
-  })
+  console.log(`[results-api] Listing results for workspace: ${ctx.workspaceId}, batchRunId: ${batchRunId}`)
+  
+  try {
+    const response = listResults(ctx.workspaceId, {
+      limit,
+      offset,
+      batchRunId,
+      outputType,
+      includeDeleted: query.includeDeleted === 'true'
+    })
 
-  if (query.includeTaskParams !== 'true' || !response.results.length) return response
+    console.log(`[results-api] Found ${response.results.length} results`)
 
-  const db = getSqlite()
-  const taskIds = Array.from(new Set(response.results.map(result => result.taskId)))
-  const rows = db.prepare(`
-    SELECT id, input_params FROM run_tasks
-    WHERE id IN (${taskIds.map(() => '?').join(',')})
-  `).all(...taskIds) as Record<string, unknown>[]
-  const paramsByTask = new Map(rows.map(row => [
-    String(row.id),
-    row.input_params ? JSON.parse(String(row.input_params)) as Record<string, unknown> : {}
-  ]))
+    if (query.includeTaskParams !== 'true' || !response.results.length) return response
 
-  return {
-    ...response,
-    results: response.results.map(result => ({
-      ...result,
-      inputParams: paramsByTask.get(result.taskId) ?? {}
-    }))
+    const db = getSqlite()
+    const taskIds = Array.from(new Set(response.results.map(result => result.taskId)))
+    const rows = db.prepare(`
+      SELECT id, input_params FROM run_tasks
+      WHERE id IN (${taskIds.map(() => '?').join(',')})
+    `).all(...taskIds) as Record<string, unknown>[]
+    const paramsByTask = new Map(rows.map(row => [
+      String(row.id),
+      row.input_params ? JSON.parse(String(row.input_params)) as Record<string, unknown> : {}
+    ]))
+
+    return {
+      ...response,
+      results: response.results.map(result => ({
+        ...result,
+        inputParams: paramsByTask.get(result.taskId) ?? {}
+      }))
+    }
+  } catch (error) {
+    console.error(`[results-api] Error listing results:`, error)
+    throw error
   }
 })

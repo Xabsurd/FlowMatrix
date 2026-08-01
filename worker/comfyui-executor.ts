@@ -10,8 +10,10 @@ import { updateTaskStatus, incrementBatchProgress } from '../server/domain/batch
 import * as comfyui from '../server/infrastructure/comfyui/client'
 import { ensureBatchImageOutputDir, sanitizeOutputFileName } from '../server/infrastructure/storage/outputs'
 import type { BackendScheduleMode } from '../shared/types/app'
+import { inferComfyResourceType } from '../shared/utils/model-resources'
 
 const POLL_INTERVAL_MS = 2000
+const PROMPT_MISSING_TIMEOUT_MS = Number(process.env.COMFYUI_PROMPT_MISSING_TIMEOUT_MS || 30_000)
 
 export async function executeComfyUITask(taskId: string): Promise<void> {
   const db = getSqlite()
@@ -60,6 +62,8 @@ export async function executeComfyUITask(taskId: string): Promise<void> {
   const rawWorkflow = JSON.parse(JSON.stringify(workflow.rawJson))
   const patchedWorkflow = await applyParams(rawWorkflow, inputParams, preset?.nodeParams || [], endpoint)
 
+  if (isTaskCanceled(db, taskId)) throw new Error('Task was canceled before submission')
+
   const sig = comfyui.extractModelSignature(patchedWorkflow)
   updateBackendModelSignature(decision.backendId, sig)
 
@@ -85,6 +89,7 @@ export async function executeComfyUITask(taskId: string): Promise<void> {
   }
 
   let history: comfyui.ComfyUIHistoryItem | null = null
+  let promptMissingSince: number | null = null
 
   while (!history) {
     await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS))
@@ -92,24 +97,30 @@ export async function executeComfyUITask(taskId: string): Promise<void> {
     const currentTask = db.prepare('SELECT status FROM run_tasks WHERE id = ?').get(taskId) as { status: string } | undefined
     if (currentTask && (currentTask.status === 'canceled' || currentTask.status === 'canceling')) {
       try {
-        await comfyui.interruptPrompt(endpoint)
+        await comfyui.cancelPrompt(endpoint, externalPromptId)
       } catch (error) {
         if (error instanceof Error) markBackendUnhealthy(decision.backendId)
       }
       throw new Error('Task was canceled by user')
     }
 
+    let historyLookupSucceeded = false
+    let historyItem: comfyui.ComfyUIHistoryItem | null = null
     try {
-      history = await comfyui.getHistory(endpoint, externalPromptId)
-      if (history && !history.status.completed) history = null
+      historyItem = await comfyui.getHistory(endpoint, externalPromptId)
+      historyLookupSucceeded = true
+      history = historyItem?.status.completed ? historyItem : null
     } catch {
       history = null
     }
 
+    let queueLookupSucceeded = false
+    let queueState: 'running' | 'pending' | 'unknown' = 'unknown'
     try {
       const q = await comfyui.getQueueInfo(endpoint)
       const counts = comfyui.getQueueCounts(q)
-      const queueState = comfyui.getPromptQueueState(q, externalPromptId)
+      queueState = comfyui.getPromptQueueState(q, externalPromptId)
+      queueLookupSucceeded = true
       updateBackendLoad(decision.backendId, counts.running, counts.pending)
       if (queueState === 'running') {
         updateTaskStatus(taskId, 'running')
@@ -121,7 +132,18 @@ export async function executeComfyUITask(taskId: string): Promise<void> {
         markBackendUnhealthy(decision.backendId)
       }
     }
+
+    if (historyLookupSucceeded && queueLookupSucceeded && !historyItem && queueState === 'unknown') {
+      promptMissingSince ??= Date.now()
+      if (Date.now() - promptMissingSince >= PROMPT_MISSING_TIMEOUT_MS) {
+        throw new Error(`ComfyUI prompt ${externalPromptId} disappeared from the queue without history`)
+      }
+    } else {
+      promptMissingSince = null
+    }
   }
+
+  if (isTaskCanceled(db, taskId)) throw new Error('Task was canceled by user')
 
   if (history.status.status_str === 'error') {
     const errorMsg = history.status.messages.map(m => JSON.stringify(m)).join('\n')
@@ -161,37 +183,31 @@ export async function executeComfyUITask(taskId: string): Promise<void> {
     }
   }
 
-  updateTaskStatus(taskId, 'succeeded', {
+  const completed = updateTaskStatus(taskId, 'succeeded', {
     resultJson: { outputs: results, promptId: externalPromptId }
   })
-  incrementBatchProgress(batchRunId, 'completed_tasks')
+  if (completed) incrementBatchProgress(batchRunId, 'completed_tasks')
+}
+
+function isTaskCanceled(db: ReturnType<typeof getSqlite>, taskId: string): boolean {
+  const row = db.prepare('SELECT status FROM run_tasks WHERE id = ?').get(taskId) as { status: string } | undefined
+  return row?.status === 'canceled' || row?.status === 'canceling'
 }
 
 function extractRequiredResources(
   inputParams: Record<string, unknown>,
-  nodeParams: Array<{ nodeId: string; nodeType: string; inputName: string; inferredType: string; runtimeInput?: boolean; defaultValue?: unknown }>
+  nodeParams: Array<{ nodeId: string; nodeType: string; inputName: string; inferredType: string; resourceType?: string; runtimeInput?: boolean; defaultValue?: unknown }>
 ): Array<{ type: string; name: string }> {
   const resources: Array<{ type: string; name: string }> = []
   for (const mapping of nodeParams) {
     const paramKey = `${mapping.nodeId}.${mapping.inputName}`
     const value = mapping.runtimeInput ? inputParams[paramKey] : mapping.defaultValue
     if (mapping.inferredType === 'MODEL' && value) {
-      const type = inferResourceType(mapping.nodeType, mapping.inputName)
+      const type = mapping.resourceType || inferComfyResourceType(mapping.nodeType, mapping.inputName)
       if (type) resources.push({ type, name: String(value) })
     }
   }
   return resources
-}
-
-function inferResourceType(nodeType: string, inputName: string): string | null {
-  if (nodeType === 'CheckpointLoaderSimple' && inputName === 'ckpt_name') return 'checkpoint'
-  if (nodeType === 'LoraLoader' && inputName === 'lora_name') return 'lora'
-  if (nodeType === 'VAELoader' && inputName === 'vae_name') return 'vae'
-  if (nodeType === 'UNETLoader' && inputName === 'unet_name') return 'unet'
-  if (nodeType === 'ControlNetLoader') return 'controlnet'
-  if (nodeType === 'UpscaleModelLoader') return 'upscale'
-  if (nodeType === 'EmbeddingLoader') return 'embedding'
-  return null
 }
 
 function applyParams(

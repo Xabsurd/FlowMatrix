@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { openaiProviderAdapter } from './openai'
+import { gptImage2ProviderAdapter } from './gpt-image-2'
 import { createError } from 'h3'
 import type { OnlineProviderAdapter } from './types'
 
 const providerAdapters = new Map<string, OnlineProviderAdapter>([
-  [openaiProviderAdapter.descriptor.id, openaiProviderAdapter]
+  [openaiProviderAdapter.descriptor.id, openaiProviderAdapter],
+  [gptImage2ProviderAdapter.descriptor.id, gptImage2ProviderAdapter]
 ])
 
 export function normalizeProviderId(endpointOrProviderId: string | null | undefined) {

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { writeFileSync, readFileSync } from 'node:fs'
+import { writeFileSync, readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { getSqlite } from '../server/infrastructure/db/sqlite'
@@ -24,9 +24,11 @@ export async function executeProviderTask(taskId: string): Promise<void> {
   const preset = getPreset(task.preset_id as string)
   const directInput = inputParams._providerDirect === true
   const scheduleMode = (directInput ? 'manual' : preset?.scheduleMode || 'manual') as BackendScheduleMode
+  const providerId = typeof inputParams._providerId === 'string' ? inputParams._providerId : undefined
+  const backendType = providerId === 'gpt-image-2' ? 'codex-cli' : 'provider'
 
   const decision = selectBackend({
-    backendType: 'provider',
+    backendType,
     backendIds: requestedBackendId ? [requestedBackendId] : preset?.backendId ? [preset.backendId] : undefined,
     mode: scheduleMode
   }, workspaceId)
@@ -37,43 +39,52 @@ export async function executeProviderTask(taskId: string): Promise<void> {
 
   const backend = db.prepare('SELECT * FROM backends WHERE id = ?').get(decision.backendId) as Record<string, unknown> | undefined
   if (!backend) throw new Error('Selected backend disappeared')
-  if (backend.type !== 'provider') throw new Error('Selected backend is not an online API backend')
+  if (backend.type !== 'provider' && backend.type !== 'codex-cli') throw new Error('Selected backend is not an online API backend')
 
-  const providerId = normalizeProviderId(backend.endpoint as string)
-  const provider = getOnlineProvider(providerId)
-  const config = getProviderRuntimeConfig(workspaceId, providerId)
+  const resolvedProviderId = typeof inputParams._providerId === 'string' ? inputParams._providerId : normalizeProviderId(backend.endpoint as string)
+  const provider = getOnlineProvider(resolvedProviderId)
+  const config = getProviderRuntimeConfig(workspaceId, resolvedProviderId)
   const imageInput = directInput
     ? buildDirectImageInput(inputParams, config.model)
     : buildImageInput(inputParams, preset?.nodeParams || [], config.model)
 
-  updateTaskStatus(taskId, 'running', {
+  const started = updateTaskStatus(taskId, 'running', {
     backendId: decision.backendId,
     scheduleDecision: decision,
     submittedPayload: imageInput,
     externalTaskId: `provider-${Date.now()}`
   })
+  if (!started) throw new Error('Task was canceled before provider submission')
   updateBackendLoad(decision.backendId, 1, 0)
 
   try {
+    console.log(`[provider-executor] Generating image for task ${taskId}`)
     const generated = await provider.generateImage(config, imageInput)
+    console.log(`[provider-executor] Generated ${generated.artifacts.length} artifacts`)
+    
     const outputs = await persistProviderArtifacts({
       taskId,
       batchRunId,
       workspaceId,
-      providerId,
+      providerId: resolvedProviderId,
       model: generated.model,
       prompt: imageInput.prompt,
       artifacts: generated.artifacts
     })
+    console.log(`[provider-executor] Persisted ${outputs.length} outputs`)
 
-    updateTaskStatus(taskId, 'succeeded', {
+    const completed = updateTaskStatus(taskId, 'succeeded', {
       resultJson: {
-        providerId,
+        providerId: resolvedProviderId,
         model: generated.model,
         outputs
       }
     })
-    incrementBatchProgress(batchRunId, 'completed_tasks')
+    if (completed) incrementBatchProgress(batchRunId, 'completed_tasks')
+    console.log(`[provider-executor] Task ${taskId} completed successfully`)
+  } catch (error) {
+    console.error(`[provider-executor] Task ${taskId} failed:`, error)
+    throw error
   } finally {
     updateBackendLoad(decision.backendId, 0, 0)
   }
@@ -103,7 +114,15 @@ function buildDirectImageInput(inputParams: Record<string, unknown>, defaultMode
 }
 
 function normalizeSize(value: unknown): GenerateImageInput['size'] {
-  return value === '1024x1536' || value === '1536x1024' || value === 'auto' ? value : '1024x1024'
+  const validSizes: string[] = [
+    '1K', '2K', '4K',
+    '1024x1024', '1024x1536', '1536x1024',
+    '1152x1536', '1536x1152',
+    '1080x1920', '1920x1080',
+    '1080x2520', '2520x1080',
+    'auto'
+  ]
+  return typeof value === 'string' && validSizes.includes(value) ? value as GenerateImageInput['size'] : '1024x1024'
 }
 
 function normalizeQuality(value: unknown): GenerateImageInput['quality'] {
@@ -210,6 +229,9 @@ async function persistProviderArtifacts(input: {
   prompt: string
   artifacts: ProviderImageArtifact[]
 }) {
+  console.log(`[persistProviderArtifacts] Starting for task ${input.taskId}`)
+  console.log(`[persistProviderArtifacts] Artifacts count: ${input.artifacts.length}`)
+  
   if (!input.artifacts.length) throw new Error('在线 API 未返回图片结果')
 
   const db = getSqlite()
@@ -218,15 +240,24 @@ async function persistProviderArtifacts(input: {
     batchRunId: input.batchRunId,
     createdAt: Number(batch?.created_at || Date.now())
   })
+  console.log(`[persistProviderArtifacts] Output dir: ${imageOutputDir}`)
+  
   const outputs: Array<{ filename: string; path: string; type: string; size: number }> = []
 
   for (const artifact of input.artifacts) {
+    console.log(`[persistProviderArtifacts] Processing artifact ${artifact.index}: mimeType=${artifact.mimeType}, url=${artifact.url}`)
+    
     const buffer = await artifactToBuffer(artifact)
+    console.log(`[persistProviderArtifacts] Buffer size: ${buffer.length}`)
+    
     const extension = extensionForMime(artifact.mimeType)
     const filename = sanitizeOutputFileName(`${input.taskId}_provider_${artifact.index}.${extension}`)
     const filePath = join(imageOutputDir, filename)
+    
+    console.log(`[persistProviderArtifacts] Writing file: ${filePath}`)
     writeFileSync(filePath, buffer)
 
+    console.log(`[persistProviderArtifacts] Inserting into database`)
     db.prepare(`
       INSERT INTO run_results (id, task_id, batch_run_id, workspace_id, output_type, storage_driver, storage_key, file_name, mime_type, file_size, metadata, created_at)
       VALUES (?, ?, ?, ?, 'image', 'local', ?, ?, ?, ?, ?, ?)
@@ -249,14 +280,40 @@ async function persistProviderArtifacts(input: {
     )
 
     outputs.push({ filename, path: filePath, type: 'image', size: buffer.length })
+    console.log(`[persistProviderArtifacts] Artifact ${artifact.index} processed successfully`)
   }
 
+  console.log(`[persistProviderArtifacts] Completed with ${outputs.length} outputs`)
   return outputs
 }
 
 async function artifactToBuffer(artifact: ProviderImageArtifact) {
   if (artifact.b64Json) return Buffer.from(artifact.b64Json, 'base64')
   if (!artifact.url) throw new Error('在线 API 图片结果缺少 b64_json 或 url')
+  
+  console.log(`[provider-executor] Processing artifact URL: ${artifact.url}`)
+  
+  // Handle local file:// URLs
+  if (artifact.url.startsWith('file://')) {
+    const filePath = artifact.url.replace('file://', '')
+    console.log(`[provider-executor] Reading local file from file:// URL: ${filePath}`)
+    if (!existsSync(filePath)) {
+      throw new Error(`本地文件不存在: ${filePath}`)
+    }
+    return readFileSync(filePath)
+  }
+  
+  // Handle local file paths (Windows paths like E:\... or Unix paths like /...)
+  if (artifact.url.match(/^[A-Z]:\\/) || artifact.url.startsWith('/')) {
+    console.log(`[provider-executor] Reading local file path: ${artifact.url}`)
+    if (!existsSync(artifact.url)) {
+      throw new Error(`本地文件不存在: ${artifact.url}`)
+    }
+    return readFileSync(artifact.url)
+  }
+  
+  // Handle remote URLs
+  console.log(`[provider-executor] Fetching remote URL: ${artifact.url}`)
   const response = await fetch(artifact.url)
   if (!response.ok) throw new Error(`下载在线 API 图片失败: ${response.status}`)
   return Buffer.from(await response.arrayBuffer())

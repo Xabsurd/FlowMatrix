@@ -271,8 +271,34 @@ export function listBatchRuns(workspaceId: string, limit = 50, offset = 0): Batc
 export function cancelBatchRun(id: string): boolean {
   const db = getSqlite()
   const now = Date.now()
-  db.prepare("UPDATE run_tasks SET status = 'canceled' WHERE batch_run_id = ? AND status IN ('queued', 'claimed', 'pending')").run(id)
-  db.prepare("UPDATE batch_runs SET status = 'canceled', finished_at = ?, updated_at = ? WHERE id = ? AND status NOT IN ('completed', 'failed')").run(now, now, id)
+  const batch = db.prepare('SELECT id FROM batch_runs WHERE id = ?').get(id)
+  if (!batch) return false
+
+  const cancel = db.transaction(() => {
+    db.prepare(`
+      UPDATE run_tasks
+      SET status = 'canceled', finished_at = COALESCE(finished_at, ?), updated_at = ?
+      WHERE batch_run_id = ?
+        AND status NOT IN ('succeeded', 'failed', 'canceled')
+    `).run(now, now, id)
+
+    db.prepare(`
+      UPDATE task_queue
+      SET status = 'completed', error = NULL, updated_at = ?
+      WHERE task_id IN (SELECT id FROM run_tasks WHERE batch_run_id = ? AND status = 'canceled')
+        AND status IN ('pending', 'claimed')
+    `).run(now, id)
+
+    db.prepare(`
+      UPDATE batch_runs
+      SET status = 'canceled',
+          canceled_tasks = (SELECT COUNT(*) FROM run_tasks WHERE batch_run_id = ? AND status = 'canceled'),
+          finished_at = COALESCE(finished_at, ?),
+          updated_at = ?
+      WHERE id = ? AND status NOT IN ('completed', 'failed')
+    `).run(id, now, now, id)
+  })
+  cancel()
   return true
 }
 
@@ -288,7 +314,7 @@ export function getTask(id: string): RunTaskRow | null {
   return row ? rowToTask(row) : null
 }
 
-export function updateTaskStatus(id: string, status: string, extra?: Record<string, unknown>): void {
+export function updateTaskStatus(id: string, status: string, extra?: Record<string, unknown>): boolean {
   const db = getSqlite()
   const now = Date.now()
   const sets = ['status = ?', 'updated_at = ?']
@@ -306,7 +332,11 @@ export function updateTaskStatus(id: string, status: string, extra?: Record<stri
   }
 
   vals.push(id)
-  db.prepare(`UPDATE run_tasks SET ${sets.join(', ')} WHERE id = ?`).run(...vals)
+  const cancellationGuard = status === 'canceled'
+    ? ''
+    : " AND status NOT IN ('canceled', 'canceling')"
+  const result = db.prepare(`UPDATE run_tasks SET ${sets.join(', ')} WHERE id = ?${cancellationGuard}`).run(...vals)
+  return result.changes > 0
 }
 
 export function incrementBatchProgress(batchRunId: string, field: 'completed_tasks' | 'failed_tasks' | 'canceled_tasks'): void {

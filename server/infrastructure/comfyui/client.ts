@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import type { ModelSignature } from '../../../shared/types/app'
+import { COMFY_RESOURCE_TYPES, inferComfyResourceType } from '../../../shared/utils/model-resources'
+import type { ComfyResourceType } from '../../../shared/utils/model-resources'
 
 export type ComfyUIQueueEntry = unknown[] | Record<string, unknown>
 
@@ -111,7 +113,7 @@ export async function testConnection(endpoint: string): Promise<{ ok: boolean; v
 }
 
 export async function getQueueInfo(endpoint: string): Promise<ComfyUIQueueInfo> {
-  return fetchJson<ComfyUIQueueInfo>(buildComfyUrl(endpoint, '/prompt'))
+  return fetchJson<ComfyUIQueueInfo>(buildComfyUrl(endpoint, '/queue'))
 }
 
 export function getQueueCounts(queue: ComfyUIQueueInfo): { running: number; pending: number } {
@@ -163,38 +165,34 @@ export interface ComfyUINodeInfo {
 }
 
 export async function listModels(endpoint: string, type: string): Promise<string[]> {
+  const resources = await listModelResources(endpoint)
+  return resources[type] ?? []
+}
+
+export async function listModelResources(endpoint: string): Promise<Record<string, string[]>> {
   const info = await getObjectInfo(endpoint)
-  const nodeName = MODEL_NODE_MAP[type]
-  if (!nodeName || !info[nodeName]) return []
+  const buckets = Object.fromEntries(COMFY_RESOURCE_TYPES.map(type => [type, new Set<string>()])) as Record<ComfyResourceType, Set<string>>
 
-  const inputKey = MODEL_INPUT_MAP[type]
-  if (!inputKey) return []
-  const inputs = info[nodeName]?.input?.required
-  const input = inputs?.[inputKey]
-  if (!input) return []
+  for (const [nodeType, nodeInfo] of Object.entries(info)) {
+    for (const [inputName, inputSpec] of Object.entries({
+      ...nodeInfo.input?.required,
+      ...nodeInfo.input?.optional
+    })) {
+      const resourceType = inferComfyResourceType(nodeType, inputName)
+      if (!resourceType) continue
 
-  const values = input[0]
-  return Array.isArray(values) ? values as string[] : []
-}
+      const values = inputSpec?.[0]
+      if (!Array.isArray(values)) continue
+      for (const value of values) {
+        if (typeof value === 'string' && value) buckets[resourceType].add(value)
+      }
+    }
+  }
 
-const MODEL_NODE_MAP: Record<string, string> = {
-  checkpoint: 'CheckpointLoaderSimple',
-  lora: 'LoraLoader',
-  vae: 'VAELoader',
-  unet: 'UNETLoader',
-  controlnet: 'ControlNetLoader',
-  upscale: 'UpscaleModelLoader',
-  embedding: 'EmbeddingLoader'
-}
-
-const MODEL_INPUT_MAP: Record<string, string> = {
-  checkpoint: 'ckpt_name',
-  lora: 'lora_name',
-  vae: 'vae_name',
-  unet: 'unet_name',
-  controlnet: 'control_net_name',
-  upscale: 'model_name',
-  embedding: 'embedding_name'
+  return Object.fromEntries(Object.entries(buckets).map(([type, values]) => [
+    type,
+    [...values].sort((a, b) => a.localeCompare(b))
+  ]))
 }
 
 export async function submitPrompt(
@@ -243,7 +241,25 @@ export async function uploadImage(
 }
 
 export async function interruptPrompt(endpoint: string): Promise<void> {
-  await fetch(buildComfyUrl(endpoint, '/interrupt'), { method: 'POST' })
+  const res = await fetch(buildComfyUrl(endpoint, '/interrupt'), { method: 'POST' })
+  if (!res.ok) throw new Error(`ComfyUI interrupt ${res.status}: ${await res.text()}`)
+}
+
+export async function deletePrompt(endpoint: string, promptId: string): Promise<void> {
+  const res = await fetch(buildComfyUrl(endpoint, '/queue'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ delete: [promptId] })
+  })
+  if (!res.ok) throw new Error(`ComfyUI queue delete ${res.status}: ${await res.text()}`)
+}
+
+export async function cancelPrompt(endpoint: string, promptId: string): Promise<'running' | 'pending' | 'unknown'> {
+  const queue = await getQueueInfo(endpoint)
+  const state = getPromptQueueState(queue, promptId)
+  if (state === 'running') await interruptPrompt(endpoint)
+  if (state === 'pending') await deletePrompt(endpoint, promptId)
+  return state
 }
 
 export function extractModelSignature(workflow: Record<string, unknown>): ModelSignature {

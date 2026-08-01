@@ -123,6 +123,16 @@ export function resolveProviderRuntimeConfig(input: {
   apiKey?: string
 }): ProviderRuntimeConfig {
   const providerId = input.providerId || 'openai'
+
+  // For CLI providers like gpt-image-2, no need for apiKey or baseUrl
+  if (providerId === 'gpt-image-2') {
+    return {
+      apiKey: '',
+      baseUrl: '',
+      model: input.model?.trim() || 'gpt-image-1'
+    }
+  }
+
   const row = getSqlite().prepare(`
     SELECT * FROM provider_secrets
     WHERE workspace_id = ? AND provider_id = ?
@@ -144,6 +154,15 @@ export function resolveProviderRuntimeConfig(input: {
 }
 
 export function getProviderRuntimeConfig(workspaceId: string, providerId = 'openai'): ProviderRuntimeConfig {
+  // For CLI providers like gpt-image-2, no need for apiKey or baseUrl
+  if (providerId === 'gpt-image-2') {
+    return {
+      apiKey: '',
+      baseUrl: '',
+      model: 'gpt-image-1'
+    }
+  }
+
   const config = resolveProviderRuntimeConfig({ workspaceId, providerId })
   if (!config.baseUrl) {
     throw new Error('请先在系统设置中保存在线 API 配置')

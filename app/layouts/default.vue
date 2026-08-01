@@ -36,6 +36,7 @@ onMounted(() => {
 
 <template>
   <div class="shell" :class="shellClass">
+    <a class="skip-link" href="#main-content">{{ t('common.skipToContent') }}</a>
     <aside class="sidebar fm-panel fm-sidebar-surface">
       <div class="sidebar-top">
         <NuxtLink class="brand" to="/">
@@ -49,7 +50,8 @@ onMounted(() => {
             class="sidebar-action"
             circle
             text
-            :title="sidebarMode === 'collapsed' ? '展开导航' : '收起导航'"
+            :title="sidebarMode === 'collapsed' ? t('common.expandNavigation') : t('common.collapseNavigation')"
+            :aria-label="sidebarMode === 'collapsed' ? t('common.expandNavigation') : t('common.collapseNavigation')"
             @click="setSidebarMode(sidebarMode === 'collapsed' ? 'expanded' : 'collapsed')"
           >
             <FmIcon :name="sidebarMode === 'collapsed' ? 'chevronsRight' : 'chevronsLeft'" />
@@ -57,7 +59,7 @@ onMounted(() => {
         </div>
       </div>
       <ElTag class="mode-tag" type="success" effect="plain">{{ modeLabel }}</ElTag>
-      <nav class="nav-list" aria-label="主导航">
+      <nav class="nav-list" :aria-label="t('common.mainNavigation')">
         <NuxtLink
           v-for="item in navigationItems"
           :key="item.to"
@@ -66,6 +68,7 @@ onMounted(() => {
           :to="item.to"
           :title="t(item.key)"
           :data-label="t(item.key)"
+          :aria-current="isActivePath(item.to) ? 'page' : undefined"
         >
           <FmIcon class="nav-icon" :name="item.icon" />
           <span class="nav-label">{{ t(item.key) }}</span>
@@ -73,17 +76,18 @@ onMounted(() => {
       </nav>
     </aside>
 
-    <main class="main">
+    <main id="main-content" class="main" tabindex="-1">
       <slot />
     </main>
 
-    <nav class="bottom-nav fm-panel" aria-label="移动端主导航">
+    <nav class="bottom-nav fm-panel" :aria-label="t('common.mobileNavigation')">
       <NuxtLink
         v-for="item in mobileNavigationItems"
         :key="item.to"
         class="bottom-nav-item"
         :class="{ active: isActivePath(item.to) }"
         :to="item.to"
+        :aria-current="isActivePath(item.to) ? 'page' : undefined"
       >
         <FmIcon :name="item.icon" />
         <span>{{ t(item.key) }}</span>
@@ -106,6 +110,27 @@ onMounted(() => {
     grid-template-columns 180ms cubic-bezier(0.2, 0, 0.2, 1),
     gap 180ms ease,
     padding 180ms ease;
+}
+
+.skip-link {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  z-index: 10000;
+  padding: 9px 12px;
+  border: 1px solid var(--fm-primary);
+  border-radius: var(--fm-radius);
+  background: var(--fm-panel-strong);
+  color: var(--fm-text);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-8px);
+}
+
+.skip-link:focus {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
 }
 
 .shell.is-sidebar-collapsed {
@@ -401,7 +426,7 @@ onMounted(() => {
   .bottom-nav {
     position: fixed;
     right: 10px;
-    bottom: 10px;
+    bottom: max(10px, env(safe-area-inset-bottom));
     left: 10px;
     z-index: 20;
     display: grid;

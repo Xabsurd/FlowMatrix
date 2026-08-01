@@ -6,19 +6,37 @@
         <h1 class="fm-page-title">{{ $t('run.title') }}</h1>
         <p class="fm-page-subtitle">{{ $t('run.subtitle') }}</p>
       </div>
-      <ElButton class="fm-run-submit-desktop" type="primary" :loading="submitting" @click="startRun">{{ $t('run.start') }}</ElButton>
+      <ElButton class="fm-run-submit-desktop" type="primary" :loading="submitting" :disabled="!canStartRun" @click="startRun">{{ startButtonLabel }}</ElButton>
     </div>
 
     <div class="fm-run-grid">
-      <section class="fm-config-panel fm-card">
+      <section v-loading="initialLoading" class="fm-config-panel fm-card">
         <div class="fm-panel-heading">
           <span>{{ $t('run.config') }}</span>
           <div class="fm-panel-actions">
-            <ElButton v-if="embedded" type="primary" :loading="submitting" @click="startRun">{{ $t('run.start') }}</ElButton>
+            <ElTooltip :content="syncTargetHint" placement="top">
+              <span>
+                <ElButton :loading="syncingResources" :disabled="!canSyncResources" @click="syncResources">{{ $t('backends.syncResources') }}</ElButton>
+              </span>
+            </ElTooltip>
+            <ElButton v-if="embedded" type="primary" :loading="submitting" :disabled="!canStartRun" @click="startRun">{{ startButtonLabel }}</ElButton>
           </div>
         </div>
 
-        <ElForm label-position="top" class="fm-config-form">
+        <ElAlert
+          v-if="loadError"
+          :title="$t('run.loadFailed')"
+          :description="loadError"
+          type="error"
+          show-icon
+          :closable="false"
+        >
+          <template #default>
+            <ElButton size="small" @click="fetchPresets">{{ $t('common.retry') }}</ElButton>
+          </template>
+        </ElAlert>
+
+        <ElForm v-if="presets.length" label-position="top" class="fm-config-form">
           <ElFormItem :label="$t('run.preset')">
             <ElSelect v-model="form.presetId" filterable :placeholder="$t('run.presetPlaceholder')" style="width: 100%">
               <ElOption v-for="preset in presets" :key="preset.id" :label="preset.name" :value="preset.id" />
@@ -31,7 +49,7 @@
             <ElSelect v-model="form.backendId" filterable :placeholder="$t('run.autoSchedule')" style="width: 100%">
               <ElOption :label="$t('run.autoSchedule')" value="" />
               <ElOption
-                v-for="backend in backends"
+                v-for="backend in comfyuiBackends"
                 :key="backend.id"
                 :label="backendOptionLabel(backend)"
                 :value="backend.id"
@@ -61,19 +79,27 @@
             <span>{{ $t('run.configNote') }}</span>
           </div>
         </div>
+
+        <ElEmpty v-else-if="!initialLoading && !loadError" :description="$t('run.noPresets')">
+          <ElButton type="primary" @click="navigateTo('/presets')">{{ $t('run.createPreset') }}</ElButton>
+        </ElEmpty>
       </section>
 
       <BatchRuntimeInputs
+        v-if="selectedPreset"
         ref="runtimeInputRef"
         :params="runtimeParams"
         mode="cartesian"
         :preset="selectedPreset"
         :backend-id="selectedRuntimeBackendId"
         @estimate-change="estimatedTaskCount = $event" />
+      <section v-else-if="!initialLoading" class="fm-card fm-runtime-placeholder">
+        <ElEmpty :description="$t('run.selectPresetToConfigure')" />
+      </section>
     </div>
 
     <div class="fm-run-submit-bar">
-      <ElButton type="primary" :loading="submitting" @click="startRun">{{ $t('run.start') }}</ElButton>
+      <ElButton type="primary" :loading="submitting" :disabled="!canStartRun" @click="startRun">{{ startButtonLabel }}</ElButton>
     </div>
   </section>
 </template>
@@ -96,6 +122,7 @@ interface NodeParam {
   inputName: string
   inferredType: string
   controlType: string
+  resourceType?: string
   runtimeInput?: boolean
   defaultValue?: unknown
 }
@@ -113,6 +140,7 @@ interface Preset {
 interface Backend {
   id: string
   name: string
+  type: string
   enabled: boolean
   paused?: boolean
   healthStatus: string
@@ -121,12 +149,16 @@ interface Backend {
 const route = useRoute()
 const presets = ref<Preset[]>([])
 const backends = ref<Backend[]>([])
+const initialLoading = ref(false)
+const loadError = ref('')
 const submitting = ref(false)
 const estimatedTaskCount = ref<string | number>(1)
 const runtimeInputRef = ref<{
   collectParams: () => Promise<Record<string, unknown[]> | null>
   applyCopiedParams: (params: Record<string, unknown>) => { applied: number; skippedFiles: number }
+  refreshResources: () => Promise<void>
 } | null>(null)
+const syncingResources = ref(false)
 const form = reactive({
   presetId: '',
   name: '',
@@ -138,36 +170,61 @@ const selectedPreset = computed(() => presets.value.find(preset => preset.id ===
 const runtimeParams = computed(() => selectedPreset.value?.nodeParams.filter(param => param.runtimeInput) || [])
 const fixedParamCount = computed(() => selectedPreset.value?.nodeParams.filter(param => !param.runtimeInput).length || 0)
 const selectedRuntimeBackendId = computed(() => form.backendId)
+const comfyuiBackends = computed(() => backends.value.filter(backend => backend.type === 'comfyui'))
+const canStartRun = computed(() => Boolean(selectedPreset.value)
+  && typeof estimatedTaskCount.value === 'number'
+  && !initialLoading.value
+  && !submitting.value)
+const canSyncResources = computed(() => comfyuiBackends.value.some(backend => backend.enabled) && !initialLoading.value && !syncingResources.value)
+const syncTargetHint = computed(() => {
+  const selected = comfyuiBackends.value.find(backend => backend.id === selectedRuntimeBackendId.value)
+  return selected
+    ? t('run.syncSelectedBackend', { name: selected.name })
+    : t('run.syncAllBackends', { count: comfyuiBackends.value.filter(backend => backend.enabled).length })
+})
+const startButtonLabel = computed(() => {
+  return typeof estimatedTaskCount.value === 'number'
+    ? t('run.startWithCount', { count: estimatedTaskCount.value })
+    : t('run.start')
+})
 
 watch(runtimeParams, (params) => {
   estimatedTaskCount.value = params.length ? t('run.pendingInput') : 1
 })
 
 async function fetchPresets() {
-  const [presetRows, backendRows] = await Promise.all([
-    $fetch<Preset[]>('/api/v1/presets'),
-    $fetch<Backend[]>('/api/v1/backends')
-  ])
-  presets.value = presetRows
-  backends.value = backendRows
-  const copied = readCopiedTask()
-  const requestedPresetId = typeof route.query.presetId === 'string' ? route.query.presetId : ''
-  const targetPresetId = copied?.presetId || requestedPresetId
-  form.presetId = presets.value.some(preset => preset.id === targetPresetId)
-    ? targetPresetId
-    : presets.value.some(preset => preset.id === requestedPresetId)
-    ? requestedPresetId
-    : presets.value[0]?.id || ''
+  initialLoading.value = true
+  loadError.value = ''
+  try {
+    const [presetRows, backendRows] = await Promise.all([
+      $fetch<Preset[]>('/api/v1/presets'),
+      $fetch<Backend[]>('/api/v1/backends')
+    ])
+    presets.value = presetRows
+    backends.value = backendRows
+    const copied = readCopiedTask()
+    const requestedPresetId = typeof route.query.presetId === 'string' ? route.query.presetId : ''
+    const targetPresetId = copied?.presetId || requestedPresetId
+    form.presetId = presets.value.some(preset => preset.id === targetPresetId)
+      ? targetPresetId
+      : presets.value.some(preset => preset.id === requestedPresetId)
+      ? requestedPresetId
+      : presets.value[0]?.id || ''
 
-  if (copied) {
-    // Wait for the runtime inputs component to receive updated params after presetId changes
-    await nextTick()
-    await nextTick()
-    const result = runtimeInputRef.value?.applyCopiedParams(copied.inputParams)
-    if (result) {
-      const skipped = result.skippedFiles ? t('run.copiedSkippedFiles', { count: result.skippedFiles }) : ''
-      ElMessage.success(t('run.copiedParams', { count: result.applied, skipped }))
+    if (copied) {
+      // Wait for the runtime inputs component to receive updated params after presetId changes
+      await nextTick()
+      await nextTick()
+      const result = runtimeInputRef.value?.applyCopiedParams(copied.inputParams)
+      if (result) {
+        const skipped = result.skippedFiles ? t('run.copiedSkippedFiles', { count: result.skippedFiles }) : ''
+        ElMessage.success(t('run.copiedParams', { count: result.applied, skipped }))
+      }
     }
+  } catch (error: unknown) {
+    loadError.value = error instanceof Error ? error.message : t('run.loadFailed')
+  } finally {
+    initialLoading.value = false
   }
 }
 
@@ -197,11 +254,39 @@ async function startRun() {
       }
     })
     ElMessage.success(t('run.taskCreated'))
-    await navigateTo(`/gallery?batchRunId=${run.id}`)
+    await navigateTo(`/gallery/${run.id}/detail`)
   } catch (error: unknown) {
     ElMessage.error(error instanceof Error ? error.message : t('run.createFailed'))
   } finally {
     submitting.value = false
+  }
+}
+
+async function syncResources() {
+  const targetBackends = selectedRuntimeBackendId.value
+    ? backends.value.filter(backend => backend.id === selectedRuntimeBackendId.value)
+    : backends.value.filter(backend => backend.type === 'comfyui' && backend.enabled)
+  const comfyBackends = targetBackends.filter(backend => backend.type === 'comfyui')
+
+  if (!comfyBackends.length) {
+    ElMessage.info(t('backends.providerNoResources'))
+    return
+  }
+
+  syncingResources.value = true
+  ElMessage.info(t('backends.syncing'))
+  try {
+    const results = await Promise.all(comfyBackends.map(backend =>
+      $fetch<{ synced: number; errors: string[] }>(`/api/v1/backends/${backend.id}/resources/refresh`, { method: 'POST' })
+    ))
+    const synced = results.reduce((total, result) => total + result.synced, 0)
+    const errors = results.reduce((total, result) => total + result.errors.length, 0)
+    ElMessage.success(t('backends.synced', { count: synced, errors: errors ? t('backends.syncErrors', { count: errors }) : '' }))
+    await runtimeInputRef.value?.refreshResources()
+  } catch (error: unknown) {
+    ElMessage.error(error instanceof Error ? error.message : t('backends.syncFailed'))
+  } finally {
+    syncingResources.value = false
   }
 }
 
@@ -235,6 +320,10 @@ onMounted(() => {
   gap: 16px;
   align-items: start;
   min-width: 0;
+}
+
+.fm-runtime-placeholder {
+  min-height: 180px;
 }
 
 .fm-config-panel {
@@ -280,7 +369,7 @@ onMounted(() => {
   font-size: 12px;
 }
 
-.fm-panel-actions {
+.fm-panel-heading .fm-panel-actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
